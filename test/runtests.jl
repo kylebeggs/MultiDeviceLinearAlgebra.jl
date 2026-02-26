@@ -1,10 +1,26 @@
 using MultiDeviceLinearAlgebra
 using Test
-using JET
+using LinearAlgebra
+using SparseArrays
+using Krylov
+using CUDA
 
-@testset "MultiDeviceLinearAlgebra.jl" begin
-    @testset "Code linting (JET.jl)" begin
-        JET.test_package(MultiDeviceLinearAlgebra; target_defined_modules = true)
-    end
-    # Write your tests here.
+const HAS_CUDA = CUDA.functional()
+const NGPUS = HAS_CUDA ? length(CUDA.devices()) : 0
+
+# Partition tests are CPU-only
+include("test_partition.jl")
+
+# Poisson matrix construction tests (CPU portion always runs, GPU portion gated internally)
+include("test_poisson.jl")
+
+# GPU tests require CUDA
+if HAS_CUDA && NGPUS >= 1
+    @info "Running GPU tests with $NGPUS device(s)"
+    include("test_vector.jl")
+    include("test_broadcast.jl")
+    include("test_matrix.jl")
+    include("test_krylov.jl")
+else
+    @warn "CUDA not available or no GPUs detected, skipping GPU tests"
 end
