@@ -1,6 +1,7 @@
 struct MultiDeviceSparseMatrixCSR{Tv,Ti} <: AbstractMatrix{Tv}
     partitions::Vector{CuSparseMatrixCSR{Tv,Ti}}
     x_buffers::Vector{CuVector{Tv}}
+    host_x::Vector{Tv}
     row_spec::PartitionSpec
     dims::Tuple{Int,Int}
 end
@@ -46,7 +47,9 @@ function MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=len
         end
     end
 
-    return MultiDeviceSparseMatrixCSR{Tv,Ti}(partitions, x_buffers, row_spec, (nrows, ncols))
+    host_x = Vector{Tv}(undef, ncols)
+
+    return MultiDeviceSparseMatrixCSR{Tv,Ti}(partitions, x_buffers, host_x, row_spec, (nrows, ncols))
 end
 
 Base.size(A::MultiDeviceSparseMatrixCSR) = A.dims
