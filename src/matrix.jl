@@ -18,10 +18,19 @@ function MultiDeviceSparseMatrixCSR(
     A::SparseMatrixCSC{Tv,Ti}, row_spec::PartitionSpec
 ) where {Tv,Ti}
     nrows, ncols = size(A)
-    ndevices = row_spec.ndevices
-    row_spec.len == nrows || throw(
-        DimensionMismatch("PartitionSpec covers $(row_spec.len) rows but matrix has $nrows")
+
+    validated = PartitionSpec(row_spec.ranges)
+    validated.len == nrows || throw(
+        DimensionMismatch("PartitionSpec covers $(validated.len) rows but matrix has $nrows")
     )
+    validated.ndevices == row_spec.ndevices || throw(
+        ArgumentError(
+            "Inconsistent PartitionSpec: ndevices=$(row_spec.ndevices) but " *
+            "length(ranges)=$(validated.ndevices)",
+        ),
+    )
+    row_spec = validated
+    ndevices = row_spec.ndevices
 
     At = SparseMatrixCSC(sparse(A'))
     csr_rowptr = At.colptr

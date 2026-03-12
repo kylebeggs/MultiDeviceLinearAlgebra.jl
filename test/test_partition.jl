@@ -84,6 +84,14 @@ end
     @testset "Overlapping ranges" begin
         @test_throws ArgumentError PartitionSpec([1:10, 10:20])
     end
+
+    @testset "Accepts AbstractVector and integer subtypes" begin
+        spec = PartitionSpec(UnitRange{Int32}[Int32(1):Int32(10), Int32(11):Int32(20)])
+        @test spec.len == 20
+        @test spec.ndevices == 2
+        @test spec.ranges == [1:10, 11:20]
+        @test eltype(spec.ranges) == UnitRange{Int}
+    end
 end
 
 @testset "device_for_index" begin

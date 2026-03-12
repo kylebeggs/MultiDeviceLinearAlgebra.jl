@@ -4,18 +4,24 @@ struct PartitionSpec
     ndevices::Int
 end
 
-function PartitionSpec(ranges::Vector{UnitRange{Int}})
+function PartitionSpec(ranges::AbstractVector{<:UnitRange{<:Integer}})
     isempty(ranges) && throw(ArgumentError("Ranges vector must be non-empty"))
+
+    vranges = Vector{UnitRange{Int}}(undef, length(ranges))
     for (i, r) in enumerate(ranges)
+        vranges[i] = UnitRange{Int}(Int(first(r)), Int(last(r)))
+    end
+
+    for (i, r) in enumerate(vranges)
         isempty(r) && throw(ArgumentError("Range $i is empty: $r"))
     end
-    first(ranges[1]) == 1 || throw(ArgumentError("First range must start at 1, got $(first(ranges[1]))"))
-    for i in 1:(length(ranges) - 1)
-        if last(ranges[i]) + 1 != first(ranges[i + 1])
-            throw(ArgumentError("Ranges $i and $(i+1) are not contiguous: $(ranges[i]) and $(ranges[i+1])"))
+    first(vranges[1]) == 1 || throw(ArgumentError("First range must start at 1, got $(first(vranges[1]))"))
+    for i in 1:(length(vranges) - 1)
+        if last(vranges[i]) + 1 != first(vranges[i + 1])
+            throw(ArgumentError("Ranges $i and $(i+1) are not contiguous: $(vranges[i]) and $(vranges[i+1])"))
         end
     end
-    return PartitionSpec(ranges, last(ranges[end]), length(ranges))
+    return PartitionSpec(vranges, last(vranges[end]), length(vranges))
 end
 
 function compute_partition_ranges(n::Int, ndevices::Int)
