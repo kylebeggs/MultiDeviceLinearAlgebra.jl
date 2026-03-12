@@ -8,15 +8,25 @@ end
 function MultiDeviceSparseMatrixCSR(
     A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=length(CUDA.devices())
 ) where {Tv,Ti}
-    nrows, ncols = size(A)
+    nrows = size(A, 1)
     @assert ndevices <= nrows "More devices ($ndevices) than rows ($nrows)"
+    row_spec = compute_partition_ranges(nrows, ndevices)
+    return MultiDeviceSparseMatrixCSR(A, row_spec)
+end
+
+function MultiDeviceSparseMatrixCSR(
+    A::SparseMatrixCSC{Tv,Ti}, row_spec::PartitionSpec
+) where {Tv,Ti}
+    nrows, ncols = size(A)
+    ndevices = row_spec.ndevices
+    row_spec.len == nrows || throw(
+        DimensionMismatch("PartitionSpec covers $(row_spec.len) rows but matrix has $nrows")
+    )
 
     At = SparseMatrixCSC(sparse(A'))
     csr_rowptr = At.colptr
     csr_colval = At.rowval
     csr_nzval = At.nzval
-
-    row_spec = compute_partition_ranges(nrows, ndevices)
 
     ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets =
         _compute_ghost_map(csr_rowptr, csr_colval, row_spec)

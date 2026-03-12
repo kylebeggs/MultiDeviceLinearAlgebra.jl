@@ -51,6 +51,41 @@
     end
 end
 
+@testset "Manual PartitionSpec construction" begin
+    @testset "Valid custom ranges" begin
+        spec = PartitionSpec([1:10, 11:30, 31:100])
+        @test spec.len == 100
+        @test spec.ndevices == 3
+        @test spec.ranges == [1:10, 11:30, 31:100]
+    end
+
+    @testset "Single range" begin
+        spec = PartitionSpec([1:50])
+        @test spec.len == 50
+        @test spec.ndevices == 1
+    end
+
+    @testset "Empty ranges vector" begin
+        @test_throws ArgumentError PartitionSpec(UnitRange{Int}[])
+    end
+
+    @testset "Empty individual range" begin
+        @test_throws ArgumentError PartitionSpec([1:0, 1:10])
+    end
+
+    @testset "Not starting at 1" begin
+        @test_throws ArgumentError PartitionSpec([2:10, 11:20])
+    end
+
+    @testset "Gap between ranges" begin
+        @test_throws ArgumentError PartitionSpec([1:10, 12:20])
+    end
+
+    @testset "Overlapping ranges" begin
+        @test_throws ArgumentError PartitionSpec([1:10, 10:20])
+    end
+end
+
 @testset "device_for_index" begin
     spec = compute_partition_ranges(10, 3)
 
