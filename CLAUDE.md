@@ -32,25 +32,30 @@ julia --project=docs docs/make.jl
 ### Core types
 - `PartitionSpec` — immutable metadata describing how indices are split across `ndevices` GPUs (ranges, total length)
 - `MultiDeviceVector{T} <: AbstractVector{T}` — partitioned dense vector; wraps `Vector{CuVector{T}}` (one per device) + `PartitionSpec`
-- `MultiDeviceSparseMatrixCSR{Tv,Ti} <: AbstractMatrix{Tv}` — row-partitioned sparse CSR matrix; each device holds its row block as `CuSparseMatrixCSR`
+- `MultiDeviceSparseMatrixCSR{Tv,Ti,GE} <: AbstractMatrix{Tv}` — row-partitioned sparse CSR matrix; each device holds its row block as `CuSparseMatrixCSR` with locally-remapped column indices; owns a `GhostExchange` for P2P halo communication
+- `GhostExchange{Tv,V,VI}` — pre-computed ghost/halo communication topology and GPU buffers for P2P exchange between devices
 
 ### Concurrency model
-All multi-device operations follow the same pattern: `@sync` block with `@async` per device, each calling `CUDA.device!(d-1)` (0-indexed) before operating on that device's partition. SpMV (`mul!`) uses an allgather step — each device gets a full copy of `x` before computing its partition of `y = A*x`.
+All multi-device operations follow the same pattern: `@sync` block with `@async` per device, each calling `CUDA.device!(d-1)` (0-indexed) before operating on that device's partition. SpMV (`mul!`) uses a ghost/halo P2P exchange — each device only fetches the off-partition column values it needs from neighboring devices, then performs local SpMV with remapped column indices.
+
+### Ghost exchange (P2P halo communication)
+At matrix construction time, each device's CSR column indices are analyzed to determine which off-partition (ghost) values are needed. Column indices are remapped to local numbering (`1:n_owned` for owned, `n_owned+1:n_owned+n_ghost` for ghosts). Before each SpMV, `consistent!` exchanges ghost values between devices via GPU staging buffers: pack → P2P transfer → assemble into `local_x = [owned | ghost]`.
 
 ### Key source files (in include order)
 1. `partition.jl` — `PartitionSpec`, `compute_partition_ranges()`, `device_for_index()`
 2. `vector.jl` — `MultiDeviceVector` constructors and AbstractArray interface
 3. `vector_linalg.jl` — `dot`, `norm`, `axpy!`, `axpby!`, `rmul!`, `lmul!`
 4. `vector_broadcast.jl` — `MultiDeviceVectorStyle` broadcasting
-5. `matrix.jl` — `MultiDeviceSparseMatrixCSR` constructor and interface
-6. `mul.jl` — sparse matrix-vector multiply with allgather
-7. `gather.jl` — device-to-host transfer for vectors and matrices
-8. `krylov_compat.jl` — Krylov.jl CG workspace support, `mdla_solve()`
-9. `poisson.jl` — `poisson_matrix_2d()` test problem generator
+5. `ghost.jl` — `GhostExchange`, ghost map computation, column remapping, `consistent!`
+6. `matrix.jl` — `MultiDeviceSparseMatrixCSR` constructor and interface
+7. `mul.jl` — sparse matrix-vector multiply with ghost exchange
+8. `gather.jl` — device-to-host transfer for vectors and matrices (reverses column remapping)
+9. `krylov_compat.jl` — Krylov.jl CG workspace support, `mdla_solve()`
+10. `poisson.jl` — `poisson_matrix_2d()` test problem generator
 
 ## Testing
 
-Uses standard `Test` module (`@testset`/`@test`/`@test_throws`). GPU tests in `runtests.jl` are gated on `CUDA.functional()` and `length(CUDA.devices()) >= 2`. The partition tests (`test_partition.jl`) run on CPU only and can always execute.
+Uses standard `Test` module (`@testset`/`@test`/`@test_throws`). GPU tests in `runtests.jl` are gated on `CUDA.functional()` and `length(CUDA.devices()) >= 1`. CPU-only tests (`test_partition.jl`, `test_ghost.jl`) always execute. GPU tests sweep over `1:min(NGPUS, 4)` device counts.
 
 ## Julia Style & Naming
 - `snake_case` for functions/variables, `CamelCase` for types/modules, `SCREAMING_SNAKE_CASE` for constants

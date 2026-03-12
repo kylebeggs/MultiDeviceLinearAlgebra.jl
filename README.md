@@ -99,14 +99,14 @@ Supports `getindex`, `setindex!`, `similar`, `zero`, `fill!`, `copyto!`, and ful
 
 ### Matrices
 
-#### `MultiDeviceSparseMatrixCSR{Tv,Ti} <: AbstractMatrix{Tv}`
+#### `MultiDeviceSparseMatrixCSR{Tv,Ti,GE} <: AbstractMatrix{Tv}`
 
-A row-partitioned sparse CSR matrix distributed across GPUs. Each device holds its block of rows as a `CuSparseMatrixCSR`.
+A row-partitioned sparse CSR matrix distributed across GPUs. Each device holds its block of rows as a `CuSparseMatrixCSR` with column indices remapped to local numbering. Ghost (off-partition) values are exchanged between devices via P2P transfers before each SpMV — only the needed values are communicated, not the entire vector.
 
 **Constructor:**
 
 ```julia
-# From a CPU SparseMatrixCSC — converts to CSR and distributes
+# From a CPU SparseMatrixCSC — converts to CSR, computes ghost topology, and distributes
 MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC; ndevices=length(CUDA.devices()))
 ```
 
@@ -119,6 +119,10 @@ Transfers a distributed vector back to the CPU as a dense `Vector`.
 #### `gather(A::MultiDeviceSparseMatrixCSR) → SparseMatrixCSC`
 
 Transfers a distributed matrix back to the CPU as a `SparseMatrixCSC`.
+
+#### `consistent!(x::MultiDeviceVector, ghost::GhostExchange, row_spec::PartitionSpec)`
+
+Exchanges ghost values between devices: packs owned values into send buffers, performs P2P transfers, and assembles `local_x = [owned | ghost]` on each device. Called automatically by `mul!` before each SpMV.
 
 #### `mdla_solve(A, b; kwargs...) → (x, stats)`
 
@@ -133,7 +137,7 @@ Generates the standard 5-point finite-difference Laplacian on an `nx × ny` grid
 | Category | Operations |
 |---|---|
 | **LinearAlgebra** | `dot`, `norm`, `axpy!`, `axpby!`, `rmul!`, `lmul!`, `mul!` |
-| **SpMV** | `mul!(y, A, x)` and `mul!(y, A, x, α, β)` — sparse matrix-vector multiply with allgather |
+| **SpMV** | `mul!(y, A, x)` and `mul!(y, A, x, α, β)` — sparse matrix-vector multiply with P2P ghost exchange |
 | **Base** | `fill!`, `copyto!`, `similar`, `zero`, `getindex`, `setindex!` |
 | **Broadcasting** | Full element-wise broadcasting (e.g., `y .= α .* x .+ β .* z`) |
 
