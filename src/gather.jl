@@ -21,12 +21,21 @@ function gather(A::MultiDeviceSparseMatrixCSR{Tv,Ti}) where {Tv,Ti}
         h_nzval = Vector{Tv}(part.nzVal)
 
         row_offset = first(A.row_spec.ranges[d]) - 1
+        owned_range = A.row_spec.ranges[d]
+        n_owned = length(owned_range)
+        ghosts = A.ghost_exchange.ghost_global_indices[d]
         local_nrows = length(A.row_spec.ranges[d])
 
         for row in 1:local_nrows
             for idx in h_rowptr[row]:(h_rowptr[row + 1] - 1)
                 push!(I_indices, Ti(row + row_offset))
-                push!(J_indices, h_colval[idx])
+                local_col = h_colval[idx]
+                if local_col <= n_owned
+                    global_col = local_col + first(owned_range) - 1
+                else
+                    global_col = ghosts[local_col - n_owned]
+                end
+                push!(J_indices, Ti(global_col))
                 push!(V_values, h_nzval[idx])
             end
         end

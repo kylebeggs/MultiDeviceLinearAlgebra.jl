@@ -1,12 +1,13 @@
-struct MultiDeviceSparseMatrixCSR{Tv,Ti} <: AbstractMatrix{Tv}
+struct MultiDeviceSparseMatrixCSR{Tv,Ti,GE} <: AbstractMatrix{Tv}
     partitions::Vector{CuSparseMatrixCSR{Tv,Ti}}
-    x_buffers::Vector{CuVector{Tv}}
-    host_x::Vector{Tv}
+    ghost_exchange::GE
     row_spec::PartitionSpec
     dims::Tuple{Int,Int}
 end
 
-function MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=length(CUDA.devices())) where {Tv,Ti}
+function MultiDeviceSparseMatrixCSR(
+    A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=length(CUDA.devices())
+) where {Tv,Ti}
     nrows, ncols = size(A)
     @assert ndevices <= nrows "More devices ($ndevices) than rows ($nrows)"
 
@@ -17,14 +18,18 @@ function MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=len
 
     row_spec = compute_partition_ranges(nrows, ndevices)
 
+    ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets =
+        _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
+
     partitions = Vector{CuSparseMatrixCSR{Tv,Ti}}(undef, ndevices)
-    x_buffers = Vector{CuVector{Tv}}(undef, ndevices)
 
     @sync for d in 1:ndevices
         @async begin
             CUDA.device!(d - 1)
             r = row_spec.ranges[d]
             local_nrows = length(r)
+            n_owned = length(r)
+            n_ghost = length(ghost_global_indices[d])
 
             rp_start = csr_rowptr[first(r)]
             rp_end = csr_rowptr[last(r) + 1] - 1
@@ -33,25 +38,29 @@ function MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=len
             local_colval = csr_colval[rp_start:rp_end]
             local_nzval = csr_nzval[rp_start:rp_end]
 
-            local_nnz = length(local_nzval)
+            remapped_colval = _remap_colval(local_colval, r, ghost_global_indices[d])
 
             d_rowptr = CuVector{Ti}(local_rowptr)
-            d_colval = CuVector{Ti}(local_colval)
+            d_colval = CuVector{Ti}(remapped_colval)
             d_nzval = CuVector{Tv}(local_nzval)
 
+            local_ncols = n_owned + n_ghost
             partitions[d] = CuSparseMatrixCSR{Tv,Ti}(
-                d_rowptr, d_colval, d_nzval, (local_nrows, ncols)
+                d_rowptr, d_colval, d_nzval, (local_nrows, local_ncols)
             )
-
-            x_buffers[d] = CuVector{Tv}(undef, ncols)
         end
     end
 
-    host_x = Vector{Tv}(undef, ncols)
+    ghost_exchange = GhostExchange(
+        ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
+        row_spec, Tv,
+    )
 
-    return MultiDeviceSparseMatrixCSR{Tv,Ti}(partitions, x_buffers, host_x, row_spec, (nrows, ncols))
+    return MultiDeviceSparseMatrixCSR{Tv,Ti,typeof(ghost_exchange)}(
+        partitions, ghost_exchange, row_spec, (nrows, ncols)
+    )
 end
 
 Base.size(A::MultiDeviceSparseMatrixCSR) = A.dims
 Base.size(A::MultiDeviceSparseMatrixCSR, d::Int) = A.dims[d]
-Base.eltype(::Type{MultiDeviceSparseMatrixCSR{Tv,Ti}}) where {Tv,Ti} = Tv
+Base.eltype(::Type{<:MultiDeviceSparseMatrixCSR{Tv}}) where {Tv} = Tv

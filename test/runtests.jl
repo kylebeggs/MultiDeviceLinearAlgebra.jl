@@ -8,8 +8,9 @@ using CUDA
 const HAS_CUDA = CUDA.functional()
 const NGPUS = HAS_CUDA ? length(CUDA.devices()) : 0
 
-# Partition tests are CPU-only
+# CPU-only tests
 include("test_partition.jl")
+include("test_ghost.jl")
 
 # Poisson matrix construction tests (CPU portion always runs, GPU portion gated internally)
 include("test_poisson.jl")
