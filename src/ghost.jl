@@ -138,7 +138,7 @@ function GhostExchange(
 
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(row_spec, d))
             n_owned = length(row_spec.ranges[d])
             n_ghost = length(ghost_global_indices[d])
             local_x[d] = CuVector{Tv}(undef, n_owned + n_ghost)
@@ -180,7 +180,7 @@ function consistent!(
     # Phase 1: Pack send buffers (gather owned values at send indices)
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(row_spec, d))
             for k in eachindex(ghost.neighbors[d])
                 if !isempty(ghost.send_local_indices[d][k])
                     ghost.send_buffers[d][k] .= x.partitions[d][ghost.send_indices_gpu[d][k]]
@@ -192,7 +192,7 @@ function consistent!(
     # Phase 2: P2P transfer into recv buffers and assemble local_x
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(row_spec, d))
             n_owned = length(row_spec.ranges[d])
 
             # Copy owned partition into local_x[1:n_owned]

@@ -1,17 +1,17 @@
-struct MultiDeviceVector{T} <: AbstractVector{T}
-    partitions::Vector{CuVector{T}}
-    spec::PartitionSpec
+struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec} <: AbstractVector{T}
+    partitions::VP
+    spec::P
 end
 
 function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
     partitions = Vector{CuVector{T}}(undef, spec.ndevices)
     @sync for d in 1:spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(spec, d))
             partitions[d] = CuVector{T}(undef, length(spec.ranges[d]))
         end
     end
-    return MultiDeviceVector{T}(partitions, spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec)}(partitions, spec)
 end
 
 function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
@@ -19,11 +19,11 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
     partitions = Vector{CuVector{T}}(undef, spec.ndevices)
     @sync for d in 1:spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(spec, d))
             partitions[d] = CuVector{T}(v[spec.ranges[d]])
         end
     end
-    return MultiDeviceVector{T}(partitions, spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec)}(partitions, spec)
 end
 
 function MultiDeviceVector(v::Vector{T}; ndevices::Int=length(CUDA.devices())) where {T}
@@ -33,7 +33,7 @@ end
 
 Base.size(v::MultiDeviceVector) = (v.spec.len,)
 Base.length(v::MultiDeviceVector) = v.spec.len
-Base.eltype(::Type{MultiDeviceVector{T}}) where {T} = T
+Base.eltype(::Type{<:MultiDeviceVector{T}}) where {T} = T
 
 function Base.similar(v::MultiDeviceVector{T}) where {T}
     return MultiDeviceVector{T}(undef, v.spec)
@@ -47,21 +47,21 @@ function Base.similar(v::MultiDeviceVector{T}, ::Type{S}, dims::Tuple{Int}) wher
     if dims == size(v)
         return MultiDeviceVector{S}(undef, v.spec)
     end
-    spec = compute_partition_ranges(dims[1], v.spec.ndevices)
+    spec = compute_partition_ranges(dims[1], v.spec.ndevices; devices=collect(Int, v.spec.devices))
     return MultiDeviceVector{S}(undef, spec)
 end
 
 function Base.getindex(v::MultiDeviceVector, i::Int)
     @boundscheck checkbounds(v, i)
     d, li = device_for_index(v.spec, i)
-    CUDA.device!(d - 1)
+    CUDA.device!(device_id(v.spec, d))
     return CUDA.@allowscalar v.partitions[d][li]
 end
 
 function Base.setindex!(v::MultiDeviceVector, val, i::Int)
     @boundscheck checkbounds(v, i)
     d, li = device_for_index(v.spec, i)
-    CUDA.device!(d - 1)
+    CUDA.device!(device_id(v.spec, d))
     CUDA.@allowscalar v.partitions[d][li] = val
     return v
 end

@@ -1,7 +1,7 @@
-struct MultiDeviceSparseMatrixCSR{Tv,Ti,GE} <: AbstractMatrix{Tv}
-    partitions::Vector{CuSparseMatrixCSR{Tv,Ti}}
+struct MultiDeviceSparseMatrixCSR{Tv,Ti,GE,VP<:AbstractVector{<:CuSparseMatrixCSR{Tv,Ti}},P<:PartitionSpec} <: AbstractMatrix{Tv}
+    partitions::VP
     ghost_exchange::GE
-    row_spec::PartitionSpec
+    row_spec::P
     dims::Tuple{Int,Int}
 end
 
@@ -19,7 +19,7 @@ function MultiDeviceSparseMatrixCSR(
 ) where {Tv,Ti}
     nrows, ncols = size(A)
 
-    validated = PartitionSpec(row_spec.ranges)
+    validated = PartitionSpec(row_spec.ranges; devices=collect(Int, row_spec.devices))
     validated.len == nrows || throw(
         DimensionMismatch("PartitionSpec covers $(validated.len) rows but matrix has $nrows")
     )
@@ -44,7 +44,7 @@ function MultiDeviceSparseMatrixCSR(
 
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(row_spec, d))
             r = row_spec.ranges[d]
             local_nrows = length(r)
             n_owned = length(r)
@@ -75,7 +75,7 @@ function MultiDeviceSparseMatrixCSR(
         row_spec, Tv,
     )
 
-    return MultiDeviceSparseMatrixCSR{Tv,Ti,typeof(ghost_exchange)}(
+    return MultiDeviceSparseMatrixCSR{Tv,Ti,typeof(ghost_exchange),typeof(partitions),typeof(row_spec)}(
         partitions, ghost_exchange, row_spec, (nrows, ncols)
     )
 end

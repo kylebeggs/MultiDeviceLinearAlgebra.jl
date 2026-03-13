@@ -1,7 +1,7 @@
 function gather(v::MultiDeviceVector{T}) where {T}
     result = Vector{T}(undef, v.spec.len)
     for d in 1:v.spec.ndevices
-        CUDA.device!(d - 1)
+        CUDA.device!(device_id(v.spec, d))
         result[v.spec.ranges[d]] = Array(v.partitions[d])
     end
     return result
@@ -14,7 +14,7 @@ function gather(A::MultiDeviceSparseMatrixCSR{Tv,Ti}) where {Tv,Ti}
     V_values = Tv[]
 
     for d in 1:A.row_spec.ndevices
-        CUDA.device!(d - 1)
+        CUDA.device!(device_id(A.row_spec, d))
         part = A.partitions[d]
         h_rowptr = Vector{Ti}(part.rowPtr)
         h_colval = Vector{Ti}(part.colVal)

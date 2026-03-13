@@ -32,7 +32,7 @@ function Base.copyto!(dest::MultiDeviceVector, bc::Broadcast.Broadcasted{MultiDe
     flat = Broadcast.flatten(bc)
     @sync for d in 1:dest.spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(dest.spec, d))
             local_bc = _localize_broadcast(flat, d)
             copyto!(dest.partitions[d], local_bc)
         end

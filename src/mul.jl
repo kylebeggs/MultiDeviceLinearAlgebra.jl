@@ -10,7 +10,7 @@ function LinearAlgebra.mul!(
 
     @sync for d in 1:x.spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(x.spec, d))
             mul!(y.partitions[d], A.partitions[d], A.ghost_exchange.local_x[d])
         end
     end
@@ -31,7 +31,7 @@ function LinearAlgebra.mul!(
 
     @sync for d in 1:x.spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(x.spec, d))
             mul!(y.partitions[d], A.partitions[d], A.ghost_exchange.local_x[d], Tv(α), Tv(β))
         end
     end
