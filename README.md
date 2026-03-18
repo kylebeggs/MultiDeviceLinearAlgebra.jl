@@ -55,19 +55,36 @@ x_cpu = gather(x)
 
 ### Partitioning
 
-#### `compute_partition_ranges(n::Int, ndevices::Int) → PartitionSpec`
+#### `compute_partition_ranges(n::Int, ndevices::Int; devices=nothing) → PartitionSpec`
 
-Splits `n` indices as evenly as possible across `ndevices`. Returns a `PartitionSpec` containing the per-device index ranges, total length, and device count.
+Splits `n` indices as evenly as possible across `ndevices`. Returns a `PartitionSpec` containing the per-device index ranges, total length, and device count. Pass `devices` to assign specific 0-indexed CUDA device IDs.
 
-#### `PartitionSpec`
+#### `compute_partition_ranges(n::Int; devices::AbstractVector{Int}) → PartitionSpec`
+
+Splits `n` indices across `length(devices)` partitions, using the given 0-indexed CUDA device IDs.
+
+#### `PartitionSpec{R,D}`
 
 ```julia
-struct PartitionSpec
-    ranges::Vector{UnitRange{Int}}  # index range for each device
-    len::Int                        # total number of indices
-    ndevices::Int                   # number of devices
+struct PartitionSpec{R<:AbstractVector{UnitRange{Int}},D<:AbstractVector{Int}}
+    ranges::R       # index range for each device
+    len::Int        # total number of indices
+    ndevices::Int   # number of devices
+    devices::D      # 0-indexed CUDA device IDs
 end
 ```
+
+**Manual constructor:**
+
+```julia
+PartitionSpec(ranges::AbstractVector{<:UnitRange}; devices=nothing)
+```
+
+Build a `PartitionSpec` from explicit contiguous ranges. Ranges must start at 1 and be non-empty. When `devices` is `nothing`, device IDs default to `0:ndevices-1`.
+
+#### `device_id(spec::PartitionSpec, d::Int) → Int`
+
+Returns the 0-indexed CUDA device ID for partition `d`.
 
 #### `device_for_index(spec::PartitionSpec, i::Int) → (device, local_index)`
 
@@ -103,11 +120,14 @@ Supports `getindex`, `setindex!`, `similar`, `zero`, `fill!`, `copyto!`, and ful
 
 A row-partitioned sparse CSR matrix distributed across GPUs. Each device holds its block of rows as a `CuSparseMatrixCSR` with column indices remapped to local numbering. Ghost (off-partition) values are exchanged between devices via P2P transfers before each SpMV — only the needed values are communicated, not the entire vector.
 
-**Constructor:**
+**Constructors:**
 
 ```julia
 # From a CPU SparseMatrixCSC — converts to CSR, computes ghost topology, and distributes
 MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC; ndevices=length(CUDA.devices()))
+
+# From a CPU SparseMatrixCSC with an explicit partition
+MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC, row_spec::PartitionSpec)
 ```
 
 ### Operations
@@ -165,6 +185,9 @@ julia --project scripts/bench_poisson.jl
 
 # Custom grid size
 POISSON_NX=200 julia --project scripts/bench_poisson.jl
+
+# Custom number of timed runs (default 5)
+BENCH_NRUNS=10 julia --project scripts/bench_poisson.jl
 ```
 
 The script sweeps over device counts (1, 2, …, N) and verifies the solution against the manufactured exact solution `u = sin(πx)sin(πy)`.
