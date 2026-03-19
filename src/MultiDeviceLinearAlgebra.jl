@@ -17,7 +17,7 @@ include("gather.jl")
 include("krylov_compat.jl")
 include("poisson.jl")
 
-export PartitionSpec, compute_partition_ranges, device_for_index
+export PartitionSpec, compute_partition_ranges, device_for_index, device_id
 export MultiDeviceVector, MultiDeviceSparseMatrixCSR
 export consistent!
 export gather, mdla_solve

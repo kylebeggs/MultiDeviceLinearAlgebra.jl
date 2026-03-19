@@ -3,15 +3,16 @@ function _empty_mdv(v::MultiDeviceVector{T}) where {T}
         [1:0 for _ in 1:v.spec.ndevices],
         0,
         v.spec.ndevices,
+        v.spec.devices,
     )
     partitions = Vector{CuVector{T}}(undef, v.spec.ndevices)
     @sync for d in 1:v.spec.ndevices
         @async begin
-            CUDA.device!(d - 1)
+            CUDA.device!(device_id(v.spec, d))
             partitions[d] = CuVector{T}(undef, 0)
         end
     end
-    return MultiDeviceVector{T}(partitions, empty_spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(empty_spec)}(partitions, empty_spec)
 end
 
 function Krylov.CgWorkspace(A::MultiDeviceSparseMatrixCSR{Tv}, b::MultiDeviceVector{Tv}) where {Tv}
