@@ -18,6 +18,7 @@ include("test_poisson.jl")
 # GPU tests require CUDA
 if HAS_CUDA && NGPUS >= 1
     @info "Running GPU tests with $NGPUS device(s)"
+    include("test_ghost_exchange.jl")
     include("test_vector.jl")
     include("test_broadcast.jl")
     include("test_matrix.jl")

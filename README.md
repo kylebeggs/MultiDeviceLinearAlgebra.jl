@@ -140,9 +140,17 @@ Transfers a distributed vector back to the CPU as a dense `Vector`.
 
 Transfers a distributed matrix back to the CPU as a `SparseMatrixCSC`.
 
-#### `consistent!(x::MultiDeviceVector, ghost::GhostExchange, row_spec::PartitionSpec)`
+#### `scatter!(x::MultiDeviceVector, ghost::GhostExchange, spec::PartitionSpec)`
 
-Exchanges ghost values between devices: packs owned values into send buffers, performs P2P transfers, and assembles `local_x = [owned | ghost]` on each device. Called automatically by `mul!` before each SpMV.
+Owner→ghost exchange: packs owned values into send buffers, performs P2P transfers, and assembles `local_x = [owned | ghost]` on each device. Called automatically by `mul!` before each SpMV.
+
+#### `reduce!(x::MultiDeviceVector, ghost::GhostExchange, spec::PartitionSpec, op)`
+
+Ghost→owner reduction: copies owned values from `ghost.local_x` into `x`, packs ghost contributions into buffers, transfers them to owner devices, and applies `op` element-wise. Used after FEM assembly to reduce shared DOF contributions back to owners.
+
+#### `GhostExchange(ghost_global_indices, spec::PartitionSpec, ::Type{Tv})`
+
+Construct a `GhostExchange` from user-specified per-device ghost index lists, independent of any matrix. Each `ghost_global_indices[d]` is a sorted vector of global indices that device `d` needs as ghosts.
 
 #### `mdla_solve(A, b; kwargs...) → (x, stats)`
 

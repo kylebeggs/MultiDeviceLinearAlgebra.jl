@@ -1,37 +1,20 @@
 """
-    _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
+    _compute_ghost_topology(ghost_global_indices, spec)
 
-Compute ghost communication topology for a row-partitioned CSR matrix.
-Returns per-device ghost indices, neighbor lists, send indices, and receive offsets.
+Compute ghost communication topology from per-device ghost index lists.
+Returns `(neighbors, send_local_indices, recv_ghost_offsets)`.
 """
-function _compute_ghost_map(
-    csr_rowptr::AbstractVector{Ti},
-    csr_colval::AbstractVector{Ti},
-    row_spec::PartitionSpec,
-) where {Ti<:Integer}
-    ndevices = row_spec.ndevices
+function _compute_ghost_topology(
+    ghost_global_indices::Vector{Vector{Int}},
+    spec::PartitionSpec,
+)
+    ndevices = spec.ndevices
 
-    ghost_global_indices = Vector{Vector{Int}}(undef, ndevices)
     # ghost_by_owner[d][owner] = sorted global indices that device d needs from owner
     ghost_by_owner = [Dict{Int,Vector{Int}}() for _ in 1:ndevices]
-
     for d in 1:ndevices
-        owned_range = row_spec.ranges[d]
-        ghost_set = Set{Int}()
-        rp_start = csr_rowptr[first(owned_range)]
-        rp_end = csr_rowptr[last(owned_range) + 1] - 1
-        for idx in rp_start:rp_end
-            col = Int(csr_colval[idx])
-            if !(col in owned_range)
-                push!(ghost_set, col)
-            end
-        end
-
-        ghosts = sort!(collect(ghost_set))
-        ghost_global_indices[d] = ghosts
-
-        for g in ghosts
-            owner, _ = device_for_index(row_spec, g)
+        for g in ghost_global_indices[d]
+            owner, _ = device_for_index(spec, g)
             owner_list = get!(Vector{Int}, ghost_by_owner[d], owner)
             push!(owner_list, g)
         end
@@ -68,13 +51,47 @@ function _compute_ghost_map(
     # send_local_indices[d][k] = local indices on d to pack for neighbor k
     send_local_indices = Vector{Vector{Vector{Int}}}(undef, ndevices)
     for d in 1:ndevices
-        owned_first = first(row_spec.ranges[d])
+        owned_first = first(spec.ranges[d])
         send_local_indices[d] = Vector{Vector{Int}}(undef, length(neighbors[d]))
         for (k, nbr) in enumerate(neighbors[d])
             globals_needed = get(needs_from[d], nbr, Int[])
             send_local_indices[d][k] = [g - owned_first + 1 for g in globals_needed]
         end
     end
+
+    return neighbors, send_local_indices, recv_ghost_offsets
+end
+
+"""
+    _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
+
+Discover ghost indices from CSR sparsity pattern, then compute communication topology.
+Returns `(ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets)`.
+"""
+function _compute_ghost_map(
+    csr_rowptr::AbstractVector{Ti},
+    csr_colval::AbstractVector{Ti},
+    row_spec::PartitionSpec,
+) where {Ti<:Integer}
+    ndevices = row_spec.ndevices
+    ghost_global_indices = Vector{Vector{Int}}(undef, ndevices)
+
+    for d in 1:ndevices
+        owned_range = row_spec.ranges[d]
+        ghost_set = Set{Int}()
+        rp_start = csr_rowptr[first(owned_range)]
+        rp_end = csr_rowptr[last(owned_range) + 1] - 1
+        for idx in rp_start:rp_end
+            col = Int(csr_colval[idx])
+            if !(col in owned_range)
+                push!(ghost_set, col)
+            end
+        end
+        ghost_global_indices[d] = sort!(collect(ghost_set))
+    end
+
+    neighbors, send_local_indices, recv_ghost_offsets =
+        _compute_ghost_topology(ghost_global_indices, row_spec)
 
     return ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets
 end
@@ -114,18 +131,17 @@ end
     GhostExchange{Tv,V,VI}
 
 Pre-computed ghost/halo communication topology and GPU buffers for peer-to-peer exchange
-between devices during sparse matrix-vector multiplication. Before each SpMV, [`consistent!`](@ref)
-uses this structure to exchange off-partition column values between neighboring devices.
+between devices. Used by [`scatter!`](@ref) (owner→ghost) and [`reduce!`](@ref) (ghost→owner).
 
 # Fields
-- `ghost_global_indices` — global column indices needed as ghosts on each device
+- `ghost_global_indices` — global indices needed as ghosts on each device
 - `neighbors` — neighboring device indices for each device
 - `send_local_indices` — local indices to pack into send buffers per neighbor per device
 - `recv_ghost_offsets` — ranges into the ghost region for received data per neighbor per device
 - `send_buffers` — pre-allocated GPU send buffers per neighbor per device
 - `recv_buffers` — pre-allocated GPU receive buffers per neighbor per device
 - `send_indices_gpu` — GPU-side copies of send index arrays for gather operations
-- `local_x` — per-device extended vectors (`[owned | ghost]`) used during SpMV
+- `local_x` — per-device extended vectors (`[owned | ghost]`) used during communication
 """
 struct GhostExchange{Tv,V<:AbstractVector{Tv},VI<:AbstractVector{Int}}
     ghost_global_indices::Vector{Vector{Int}}
@@ -182,12 +198,51 @@ function GhostExchange(
 end
 
 """
-    consistent!(x, ghost, row_spec)
+    GhostExchange(ghost_global_indices, spec, Tv)
 
-Exchange ghost values: pack owned data into send buffers, transfer between devices,
+Construct a `GhostExchange` from user-specified per-device ghost index lists, independent
+of any matrix. Each `ghost_global_indices[d]` is a sorted vector of global indices that
+device `d` needs as ghosts.
+"""
+function GhostExchange(
+    ghost_global_indices::AbstractVector{<:AbstractVector{Int}},
+    spec::PartitionSpec,
+    ::Type{Tv},
+) where {Tv}
+    length(ghost_global_indices) == spec.ndevices || throw(
+        ArgumentError(
+            "Length of ghost_global_indices ($(length(ghost_global_indices))) must equal ndevices ($(spec.ndevices))"
+        ),
+    )
+    for d in 1:spec.ndevices
+        for g in ghost_global_indices[d]
+            (1 <= g <= spec.len) || throw(
+                BoundsError("Ghost index $g on device $d is out of range 1:$(spec.len)")
+            )
+            g in spec.ranges[d] && throw(
+                ArgumentError(
+                    "Ghost index $g on device $d falls in its owned range $(spec.ranges[d])"
+                ),
+            )
+        end
+    end
+
+    ggi = [collect(Int, gi) for gi in ghost_global_indices]
+    neighbors, send_local_indices, recv_ghost_offsets =
+        _compute_ghost_topology(ggi, spec)
+
+    return GhostExchange(
+        ggi, neighbors, send_local_indices, recv_ghost_offsets, spec, Tv
+    )
+end
+
+"""
+    scatter!(x, ghost, spec)
+
+Owner→ghost exchange: pack owned data into send buffers, transfer between devices,
 and assemble `local_x = [owned | ghost]` on each device.
 """
-function consistent!(
+function scatter!(
     x::MultiDeviceVector{Tv},
     ghost::GhostExchange{Tv},
     row_spec::PartitionSpec,
@@ -228,4 +283,62 @@ function consistent!(
             end
         end
     end
+end
+
+"""
+    reduce!(x, ghost, spec, op)
+
+Ghost→owner reduction: for each device, copies owned values from `ghost.local_x` into
+`x.partitions`, packs ghost contributions into buffers, transfers them to owner devices,
+and applies `op` element-wise into the owner's partition of `x`.
+
+The caller is responsible for populating `ghost.local_x[d]` (the `[owned | ghost]` extended
+vector) before calling `reduce!`.
+"""
+function reduce!(
+    x::MultiDeviceVector{Tv},
+    ghost::GhostExchange{Tv},
+    spec::PartitionSpec,
+    op::F,
+) where {Tv,F<:Function}
+    ndevices = spec.ndevices
+
+    # Phase 1: Copy owned portion from local_x into x, and pack ghost contributions
+    @sync for d in 1:ndevices
+        @async begin
+            CUDA.device!(device_id(spec, d))
+            n_owned = length(spec.ranges[d])
+
+            copyto!(x.partitions[d], view(ghost.local_x[d], 1:n_owned))
+
+            # Pack ghost values into recv_buffers (reused as send direction for reduce)
+            for (k, _nbr) in enumerate(ghost.neighbors[d])
+                offsets = ghost.recv_ghost_offsets[d][k]
+                if !isempty(offsets)
+                    copyto!(
+                        ghost.recv_buffers[d][k],
+                        view(ghost.local_x[d], n_owned .+ offsets),
+                    )
+                end
+            end
+        end
+    end
+
+    # Phase 2: P2P transfer ghost contributions to owners and apply op
+    @sync for d in 1:ndevices
+        @async begin
+            CUDA.device!(device_id(spec, d))
+            for (k, nbr) in enumerate(ghost.neighbors[d])
+                if !isempty(ghost.send_local_indices[d][k])
+                    k_in_nbr = findfirst(==(d), ghost.neighbors[nbr])
+                    copyto!(ghost.send_buffers[d][k], ghost.recv_buffers[nbr][k_in_nbr])
+                    x.partitions[d][ghost.send_indices_gpu[d][k]] .= op.(
+                        x.partitions[d][ghost.send_indices_gpu[d][k]],
+                        ghost.send_buffers[d][k],
+                    )
+                end
+            end
+        end
+    end
+    return x
 end
