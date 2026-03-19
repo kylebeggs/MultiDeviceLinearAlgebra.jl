@@ -1,3 +1,13 @@
+"""
+    MultiDeviceVector{T,VP,P} <: AbstractVector{T}
+
+Dense vector distributed across CUDA devices, with each device holding a `CuVector{T}`
+partition.
+
+# Fields
+- `partitions::VP` — per-device `CuVector{T}` segments
+- `spec::P` — [`PartitionSpec`](@ref) describing the index distribution
+"""
 struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec} <: AbstractVector{T}
     partitions::VP
     spec::P

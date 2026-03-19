@@ -110,6 +110,23 @@ function _remap_colval(
     return remapped
 end
 
+"""
+    GhostExchange{Tv,V,VI}
+
+Pre-computed ghost/halo communication topology and GPU buffers for peer-to-peer exchange
+between devices during sparse matrix-vector multiplication. Before each SpMV, [`consistent!`](@ref)
+uses this structure to exchange off-partition column values between neighboring devices.
+
+# Fields
+- `ghost_global_indices` — global column indices needed as ghosts on each device
+- `neighbors` — neighboring device indices for each device
+- `send_local_indices` — local indices to pack into send buffers per neighbor per device
+- `recv_ghost_offsets` — ranges into the ghost region for received data per neighbor per device
+- `send_buffers` — pre-allocated GPU send buffers per neighbor per device
+- `recv_buffers` — pre-allocated GPU receive buffers per neighbor per device
+- `send_indices_gpu` — GPU-side copies of send index arrays for gather operations
+- `local_x` — per-device extended vectors (`[owned | ghost]`) used during SpMV
+"""
 struct GhostExchange{Tv,V<:AbstractVector{Tv},VI<:AbstractVector{Int}}
     ghost_global_indices::Vector{Vector{Int}}
     neighbors::Vector{Vector{Int}}

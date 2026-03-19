@@ -1,3 +1,9 @@
+"""
+    MultiDeviceVectorStyle <: Broadcast.AbstractArrayStyle{1}
+
+Broadcast style for [`MultiDeviceVector`](@ref), ensuring broadcasting operations preserve
+multi-device distribution.
+"""
 struct MultiDeviceVectorStyle <: Broadcast.AbstractArrayStyle{1} end
 
 MultiDeviceVectorStyle(::Val{1}) = MultiDeviceVectorStyle()

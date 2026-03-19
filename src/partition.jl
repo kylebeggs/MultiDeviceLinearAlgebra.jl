@@ -1,3 +1,14 @@
+"""
+    PartitionSpec{R,D}
+
+Immutable metadata describing how indices are partitioned across GPU devices.
+
+# Fields
+- `ranges::R` — index ranges assigned to each device
+- `len::Int` — total number of indices across all partitions
+- `ndevices::Int` — number of devices
+- `devices::D` — 0-indexed CUDA device IDs for each partition
+"""
 struct PartitionSpec{R<:AbstractVector{UnitRange{Int}},D<:AbstractVector{Int}}
     ranges::R
     len::Int

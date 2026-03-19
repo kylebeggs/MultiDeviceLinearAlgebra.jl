@@ -1,3 +1,16 @@
+"""
+    MultiDeviceSparseMatrixCSR{Tv,Ti,GE,VP,P} <: AbstractMatrix{Tv}
+
+Row-partitioned sparse CSR matrix distributed across CUDA devices. Each device holds its
+row block as a `CuSparseMatrixCSR` with locally-remapped column indices. Off-partition column
+values are exchanged via the embedded [`GhostExchange`](@ref) before each SpMV.
+
+# Fields
+- `partitions::VP` — per-device `CuSparseMatrixCSR` row blocks
+- `ghost_exchange::GE` — [`GhostExchange`](@ref) for P2P halo communication
+- `row_spec::P` — [`PartitionSpec`](@ref) describing the row distribution
+- `dims::Tuple{Int,Int}` — global matrix dimensions `(nrows, ncols)`
+"""
 struct MultiDeviceSparseMatrixCSR{Tv,Ti,GE,VP<:AbstractVector{<:CuSparseMatrixCSR{Tv,Ti}},P<:PartitionSpec} <: AbstractMatrix{Tv}
     partitions::VP
     ghost_exchange::GE
