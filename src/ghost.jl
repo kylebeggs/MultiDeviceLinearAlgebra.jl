@@ -236,6 +236,61 @@ function GhostExchange(
     )
 end
 
+function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec, ghost::GhostExchange{T}) where {T}
+    @assert length(v) == spec.len "Vector length $(length(v)) != spec length $(spec.len)"
+    partitions = Vector{CuVector{T}}(undef, spec.ndevices)
+    @sync for d in 1:spec.ndevices
+        @async begin
+            CUDA.device!(device_id(spec, d))
+            partitions[d] = CuVector{T}(v[spec.ranges[d]])
+        end
+    end
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost)}(
+        partitions, spec, ghost
+    )
+end
+
+"""
+    attach_ghost(v::MultiDeviceVector, ghost::GhostExchange)
+
+Return a new `MultiDeviceVector` that shares the same partition data but carries the given
+[`GhostExchange`](@ref), enabling self-contained [`scatter!`](@ref) and [`reduce!`](@ref).
+"""
+function attach_ghost(
+    v::MultiDeviceVector{T,VP,P}, ghost::GhostExchange{T}
+) where {T,VP,P}
+    return MultiDeviceVector{T,VP,P,typeof(ghost)}(v.partitions, v.spec, ghost)
+end
+
+"""
+    attach_ghost(v::MultiDeviceVector, ghost_global_indices)
+
+Build a [`GhostExchange`](@ref) from per-device ghost index lists and attach it to `v`.
+Creates fresh GPU buffers (no aliasing with other exchanges).
+"""
+function attach_ghost(
+    v::MultiDeviceVector{T}, ghost_global_indices::AbstractVector{<:AbstractVector{Int}}
+) where {T}
+    ghost = GhostExchange(ghost_global_indices, v.spec, T)
+    return attach_ghost(v, ghost)
+end
+
+"""
+    scatter!(x::MultiDeviceVector)
+
+Owner→ghost exchange using the vector's own [`GhostExchange`](@ref). The vector must have
+been constructed with a ghost exchange (see [`attach_ghost`](@ref)).
+"""
+function scatter!(x::MultiDeviceVector{Tv,VP,P,GE}) where {Tv,VP,P,GE<:GhostExchange}
+    return scatter!(x, x.ghost_exchange, x.spec)
+end
+
+function scatter!(::MultiDeviceVector{Tv,VP,P,Nothing}) where {Tv,VP,P}
+    throw(ArgumentError(
+        "scatter! requires a GhostExchange; use attach_ghost(x, ghost) first, or call scatter!(x, ghost, spec)"
+    ))
+end
+
 """
     scatter!(x, ghost, spec)
 
@@ -283,6 +338,24 @@ function scatter!(
             end
         end
     end
+end
+
+"""
+    reduce!(x::MultiDeviceVector, op)
+
+Ghost→owner reduction using the vector's own [`GhostExchange`](@ref). The vector must have
+been constructed with a ghost exchange (see [`attach_ghost`](@ref)).
+"""
+function reduce!(
+    x::MultiDeviceVector{Tv,VP,P,GE}, op::F
+) where {Tv,VP,P,GE<:GhostExchange,F<:Function}
+    return reduce!(x, x.ghost_exchange, x.spec, op)
+end
+
+function reduce!(::MultiDeviceVector{Tv,VP,P,Nothing}, ::F) where {Tv,VP,P,F<:Function}
+    throw(ArgumentError(
+        "reduce! requires a GhostExchange; use attach_ghost(x, ghost) first, or call reduce!(x, ghost, spec, op)"
+    ))
 end
 
 """

@@ -252,3 +252,74 @@
         end
     end
 end
+
+@testset "Convenience scatter!/reduce! (vector-owned exchange)" begin
+    @testset "scatter!(x) convenience" begin
+        for ndev in 1:min(NGPUS, 4)
+            ndev < 2 && continue
+            @testset "$ndev devices" begin
+                n = 10 * ndev
+                spec = compute_partition_ranges(n, ndev)
+                ggi = _neighbor_ghost_indices(spec)
+                ghost = GhostExchange(ggi, spec, Float64)
+
+                x = attach_ghost(MultiDeviceVector(collect(1.0:n), spec), ghost)
+                scatter!(x)
+
+                for d in 1:ndev
+                    local_x_host = Array(ghost.local_x[d])
+                    n_owned = length(spec.ranges[d])
+                    for (i, g) in enumerate(ggi[d])
+                        @test local_x_host[n_owned + i] ≈ Float64(g)
+                    end
+                end
+            end
+        end
+    end
+
+    @testset "reduce!(x, op) convenience" begin
+        for ndev in 1:min(NGPUS, 4)
+            ndev < 2 && continue
+            @testset "$ndev devices" begin
+                n = 10 * ndev
+                spec = compute_partition_ranges(n, ndev)
+                ggi = _neighbor_ghost_indices(spec)
+                ghost = GhostExchange(ggi, spec, Float64)
+
+                for d in 1:ndev
+                    CUDA.device!(device_id(spec, d))
+                    n_owned = length(spec.ranges[d])
+                    n_ghost = length(ggi[d])
+                    ghost.local_x[d] .= vcat(
+                        CUDA.ones(Float64, n_owned),
+                        CUDA.fill(10.0, n_ghost),
+                    )
+                end
+
+                x = attach_ghost(MultiDeviceVector{Float64}(undef, spec), ghost)
+                for d in 1:ndev
+                    CUDA.device!(device_id(spec, d))
+                    x.partitions[d] .= 0.0
+                end
+
+                reduce!(x, +)
+
+                x_host = Array(gather(x))
+                for i in 1:n
+                    owner, _ = device_for_index(spec, i)
+                    n_contributors = count(
+                        d -> d != owner && i in ggi[d], 1:ndev
+                    )
+                    @test x_host[i] ≈ 1.0 + 10.0 * n_contributors
+                end
+            end
+        end
+    end
+
+    @testset "scatter!/reduce! without exchange throws" begin
+        spec = compute_partition_ranges(20, min(NGPUS, 2))
+        x = MultiDeviceVector(randn(20), spec)
+        @test_throws ArgumentError scatter!(x)
+        @test_throws ArgumentError reduce!(x, +)
+    end
+end

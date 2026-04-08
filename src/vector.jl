@@ -1,5 +1,5 @@
 """
-    MultiDeviceVector{T,VP,P} <: AbstractVector{T}
+    MultiDeviceVector{T,VP,P,GE} <: AbstractVector{T}
 
 Dense vector distributed across CUDA devices, with each device holding a `CuVector{T}`
 partition.
@@ -7,10 +7,14 @@ partition.
 # Fields
 - `partitions::VP` — per-device `CuVector{T}` segments
 - `spec::P` — [`PartitionSpec`](@ref) describing the index distribution
+- `ghost_exchange::GE` — optional [`GhostExchange`](@ref) for self-contained halo communication
+  (`Nothing` when no exchange is attached)
 """
-struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec} <: AbstractVector{T}
+struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec,GE} <:
+       AbstractVector{T}
     partitions::VP
     spec::P
+    ghost_exchange::GE
 end
 
 function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
@@ -21,7 +25,7 @@ function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
             partitions[d] = CuVector{T}(undef, length(spec.ranges[d]))
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec)}(partitions, spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),Nothing}(partitions, spec, nothing)
 end
 
 function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
@@ -33,7 +37,7 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
             partitions[d] = CuVector{T}(v[spec.ranges[d]])
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec)}(partitions, spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),Nothing}(partitions, spec, nothing)
 end
 
 function MultiDeviceVector(v::Vector{T}; ndevices::Int=length(CUDA.devices())) where {T}
