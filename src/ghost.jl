@@ -2,7 +2,7 @@
     _compute_ghost_topology(ghost_global_indices, spec)
 
 Compute ghost communication topology from per-device ghost index lists.
-Returns `(neighbors, send_local_indices, recv_ghost_offsets)`.
+Returns `(neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse)`.
 """
 function _compute_ghost_topology(
     ghost_global_indices::Vector{Vector{Int}},
@@ -59,14 +59,23 @@ function _compute_ghost_topology(
         end
     end
 
-    return neighbors, send_local_indices, recv_ghost_offsets
+    # neighbor_reverse[d][k] = index of d in neighbors[neighbors[d][k]]'s neighbor list
+    neighbor_reverse = Vector{Vector{Int}}(undef, ndevices)
+    for d in 1:ndevices
+        neighbor_reverse[d] = Vector{Int}(undef, length(neighbors[d]))
+        for (k, nbr) in enumerate(neighbors[d])
+            neighbor_reverse[d][k] = findfirst(==(d), neighbors[nbr])
+        end
+    end
+
+    return neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse
 end
 
 """
     _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
 
 Discover ghost indices from CSR sparsity pattern, then compute communication topology.
-Returns `(ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets)`.
+Returns `(ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse)`.
 """
 function _compute_ghost_map(
     csr_rowptr::AbstractVector{Ti},
@@ -90,10 +99,11 @@ function _compute_ghost_map(
         ghost_global_indices[d] = sort!(collect(ghost_set))
     end
 
-    neighbors, send_local_indices, recv_ghost_offsets =
+    neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse =
         _compute_ghost_topology(ghost_global_indices, row_spec)
 
-    return ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets
+    return ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
+        neighbor_reverse
 end
 
 """
@@ -138,6 +148,7 @@ between devices. Used by [`scatter!`](@ref) (owner→ghost) and [`reduce!`](@ref
 - `neighbors` — neighboring device indices for each device
 - `send_local_indices` — local indices to pack into send buffers per neighbor per device
 - `recv_ghost_offsets` — ranges into the ghost region for received data per neighbor per device
+- `neighbor_reverse` — precomputed reverse neighbor lookup; `neighbor_reverse[d][k]` is the index of `d` in `neighbors[neighbors[d][k]]`
 - `send_buffers` — pre-allocated GPU send buffers per neighbor per device
 - `recv_buffers` — pre-allocated GPU receive buffers per neighbor per device
 - `send_indices_gpu` — GPU-side copies of send index arrays for gather operations
@@ -148,6 +159,7 @@ struct GhostExchange{Tv,V<:AbstractVector{Tv},VI<:AbstractVector{Int}}
     neighbors::Vector{Vector{Int}}
     send_local_indices::Vector{Vector{Vector{Int}}}
     recv_ghost_offsets::Vector{Vector{UnitRange{Int}}}
+    neighbor_reverse::Vector{Vector{Int}}
     send_buffers::Vector{Vector{V}}
     recv_buffers::Vector{Vector{V}}
     send_indices_gpu::Vector{Vector{VI}}
@@ -159,6 +171,7 @@ function GhostExchange(
     neighbors::Vector{Vector{Int}},
     send_local_indices::Vector{Vector{Vector{Int}}},
     recv_ghost_offsets::Vector{Vector{UnitRange{Int}}},
+    neighbor_reverse::Vector{Vector{Int}},
     row_spec::PartitionSpec,
     ::Type{Tv},
 ) where {Tv}
@@ -193,7 +206,7 @@ function GhostExchange(
 
     return GhostExchange{Tv,CuVector{Tv},CuVector{Int}}(
         ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
-        send_buffers, recv_buffers, send_indices_gpu, local_x,
+        neighbor_reverse, send_buffers, recv_buffers, send_indices_gpu, local_x,
     )
 end
 
@@ -228,11 +241,11 @@ function GhostExchange(
     end
 
     ggi = [collect(Int, gi) for gi in ghost_global_indices]
-    neighbors, send_local_indices, recv_ghost_offsets =
+    neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse =
         _compute_ghost_topology(ggi, spec)
 
     return GhostExchange(
-        ggi, neighbors, send_local_indices, recv_ghost_offsets, spec, Tv
+        ggi, neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse, spec, Tv
     )
 end
 
@@ -329,7 +342,7 @@ function scatter!(
             for (k, nbr) in enumerate(ghost.neighbors[d])
                 offsets = ghost.recv_ghost_offsets[d][k]
                 if !isempty(offsets)
-                    k_in_nbr = findfirst(==(d), ghost.neighbors[nbr])
+                    k_in_nbr = ghost.neighbor_reverse[d][k]
                     copyto!(ghost.recv_buffers[d][k], ghost.send_buffers[nbr][k_in_nbr])
                     copyto!(
                         view(ghost.local_x[d], n_owned .+ offsets), ghost.recv_buffers[d][k]
@@ -403,7 +416,7 @@ function reduce!(
             CUDA.device!(device_id(spec, d))
             for (k, nbr) in enumerate(ghost.neighbors[d])
                 if !isempty(ghost.send_local_indices[d][k])
-                    k_in_nbr = findfirst(==(d), ghost.neighbors[nbr])
+                    k_in_nbr = ghost.neighbor_reverse[d][k]
                     copyto!(ghost.send_buffers[d][k], ghost.recv_buffers[nbr][k_in_nbr])
                     x.partitions[d][ghost.send_indices_gpu[d][k]] .= op.(
                         x.partitions[d][ghost.send_indices_gpu[d][k]],
