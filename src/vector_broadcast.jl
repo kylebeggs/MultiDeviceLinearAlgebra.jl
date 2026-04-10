@@ -13,7 +13,8 @@ Base.BroadcastStyle(::Type{<:MultiDeviceVector}) = MultiDeviceVectorStyle()
 
 function Base.similar(bc::Broadcast.Broadcasted{MultiDeviceVectorStyle}, ::Type{T}) where {T}
     mdv = _find_mdv(bc)
-    return MultiDeviceVector{T}(undef, mdv.spec)
+    ghost = T === eltype(mdv) ? copy_exchange(mdv.ghost_exchange, mdv.spec) : nothing
+    return MultiDeviceVector{T}(undef, mdv.spec, ghost)
 end
 
 function _find_mdv(bc::Broadcast.Broadcasted)

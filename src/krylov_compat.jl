@@ -12,7 +12,9 @@ function _empty_mdv(v::MultiDeviceVector{T}) where {T}
             partitions[d] = CuVector{T}(undef, 0)
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(empty_spec)}(partitions, empty_spec)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(empty_spec),Nothing}(
+        partitions, empty_spec, nothing
+    )
 end
 
 function Krylov.CgWorkspace(A::MultiDeviceSparseMatrixCSR{Tv}, b::MultiDeviceVector{Tv}) where {Tv}

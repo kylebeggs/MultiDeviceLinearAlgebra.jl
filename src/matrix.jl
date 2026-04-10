@@ -50,8 +50,8 @@ function MultiDeviceSparseMatrixCSR(
     csr_colval = At.rowval
     csr_nzval = At.nzval
 
-    ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets =
-        _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
+    ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
+        neighbor_reverse = _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
 
     partitions = Vector{CuSparseMatrixCSR{Tv,Ti}}(undef, ndevices)
 
@@ -85,7 +85,7 @@ function MultiDeviceSparseMatrixCSR(
 
     ghost_exchange = GhostExchange(
         ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
-        row_spec, Tv,
+        neighbor_reverse, row_spec, Tv,
     )
 
     return MultiDeviceSparseMatrixCSR{Tv,Ti,typeof(ghost_exchange),typeof(partitions),typeof(row_spec)}(
