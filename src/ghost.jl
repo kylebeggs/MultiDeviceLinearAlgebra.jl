@@ -249,19 +249,42 @@ function GhostExchange(
     )
 end
 
-function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec, ghost::GhostExchange{T}) where {T}
-    @assert length(v) == spec.len "Vector length $(length(v)) != spec length $(spec.len)"
-    partitions = Vector{CuVector{T}}(undef, spec.ndevices)
-    @sync for d in 1:spec.ndevices
+"""
+    copy_exchange(ghost::GhostExchange, spec::PartitionSpec)
+
+Create a new [`GhostExchange`](@ref) that shares the same topology (neighbor lists, index
+mappings) but allocates independent GPU communication buffers. Used by `similar` to give
+each vector its own scratch space for [`scatter!`](@ref) / [`reduce!`](@ref).
+"""
+function copy_exchange(ghost::GhostExchange{Tv,V,VI}, spec::PartitionSpec) where {Tv,V,VI}
+    ndevices = length(ghost.local_x)
+    send_buffers = Vector{Vector{V}}(undef, ndevices)
+    recv_buffers = Vector{Vector{V}}(undef, ndevices)
+    local_x = Vector{V}(undef, ndevices)
+
+    @sync for d in 1:ndevices
         @async begin
             CUDA.device!(device_id(spec, d))
-            partitions[d] = CuVector{T}(v[spec.ranges[d]])
+            local_x[d] = similar(ghost.local_x[d])
+            send_buffers[d] = V[similar(b) for b in ghost.send_buffers[d]]
+            recv_buffers[d] = V[similar(b) for b in ghost.recv_buffers[d]]
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost)}(
-        partitions, spec, ghost
+
+    return GhostExchange{Tv,V,VI}(
+        ghost.ghost_global_indices,
+        ghost.neighbors,
+        ghost.send_local_indices,
+        ghost.recv_ghost_offsets,
+        ghost.neighbor_reverse,
+        send_buffers,
+        recv_buffers,
+        ghost.send_indices_gpu,
+        local_x,
     )
 end
+
+copy_exchange(::Nothing, ::PartitionSpec) = nothing
 
 """
     attach_ghost(v::MultiDeviceVector, ghost::GhostExchange)

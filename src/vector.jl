@@ -2,13 +2,15 @@
     MultiDeviceVector{T,VP,P,GE} <: AbstractVector{T}
 
 Dense vector distributed across CUDA devices, with each device holding a `CuVector{T}`
-partition.
+partition. Carries a [`GhostExchange`](@ref) for self-contained halo communication
+(owner↔ghost exchange for matrix-free methods). Pass `nothing` to opt out when ghost
+communication is not needed (e.g. vectors used only in SpMV, where the matrix owns the
+exchange).
 
 # Fields
 - `partitions::VP` — per-device `CuVector{T}` segments
 - `spec::P` — [`PartitionSpec`](@ref) describing the index distribution
-- `ghost_exchange::GE` — optional [`GhostExchange`](@ref) for self-contained halo communication
-  (`Nothing` when no exchange is attached)
+- `ghost_exchange::GE` — [`GhostExchange`](@ref) for halo communication, or `Nothing`
 """
 struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec,GE} <:
        AbstractVector{T}
@@ -17,7 +19,7 @@ struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec,GE
     ghost_exchange::GE
 end
 
-function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
+function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec, ghost_exchange) where {T}
     partitions = Vector{CuVector{T}}(undef, spec.ndevices)
     @sync for d in 1:spec.ndevices
         @async begin
@@ -25,10 +27,16 @@ function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
             partitions[d] = CuVector{T}(undef, length(spec.ranges[d]))
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),Nothing}(partitions, spec, nothing)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost_exchange)}(
+        partitions, spec, ghost_exchange
+    )
 end
 
-function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
+function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec) where {T}
+    return MultiDeviceVector{T}(undef, spec, nothing)
+end
+
+function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec, ghost_exchange) where {T}
     @assert length(v) == spec.len "Vector length $(length(v)) != spec length $(spec.len)"
     partitions = Vector{CuVector{T}}(undef, spec.ndevices)
     @sync for d in 1:spec.ndevices
@@ -37,7 +45,13 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
             partitions[d] = CuVector{T}(v[spec.ranges[d]])
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),Nothing}(partitions, spec, nothing)
+    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost_exchange)}(
+        partitions, spec, ghost_exchange
+    )
+end
+
+function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
+    return MultiDeviceVector(v, spec, nothing)
 end
 
 function MultiDeviceVector(v::Vector{T}; ndevices::Int=length(CUDA.devices())) where {T}
@@ -50,19 +64,21 @@ Base.length(v::MultiDeviceVector) = v.spec.len
 Base.eltype(::Type{<:MultiDeviceVector{T}}) where {T} = T
 
 function Base.similar(v::MultiDeviceVector{T}) where {T}
-    return MultiDeviceVector{T}(undef, v.spec)
+    return MultiDeviceVector{T}(undef, v.spec, copy_exchange(v.ghost_exchange, v.spec))
 end
 
-function Base.similar(v::MultiDeviceVector, ::Type{S}) where {S}
-    return MultiDeviceVector{S}(undef, v.spec)
+function Base.similar(v::MultiDeviceVector{T}, ::Type{S}) where {T,S}
+    ghost = S === T ? copy_exchange(v.ghost_exchange, v.spec) : nothing
+    return MultiDeviceVector{S}(undef, v.spec, ghost)
 end
 
 function Base.similar(v::MultiDeviceVector{T}, ::Type{S}, dims::Tuple{Int}) where {T,S}
     if dims == size(v)
-        return MultiDeviceVector{S}(undef, v.spec)
+        ghost = S === T ? copy_exchange(v.ghost_exchange, v.spec) : nothing
+        return MultiDeviceVector{S}(undef, v.spec, ghost)
     end
     spec = compute_partition_ranges(dims[1], v.spec.ndevices; devices=collect(Int, v.spec.devices))
-    return MultiDeviceVector{S}(undef, spec)
+    return MultiDeviceVector{S}(undef, spec, nothing)
 end
 
 function Base.getindex(v::MultiDeviceVector, i::Int)
