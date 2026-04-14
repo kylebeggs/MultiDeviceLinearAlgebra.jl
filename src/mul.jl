@@ -6,7 +6,7 @@ function LinearAlgebra.mul!(
     @assert y.spec.len == A.dims[1] "y length $(y.spec.len) != A rows $(A.dims[1])"
     @assert x.spec.len == A.dims[2] "x length $(x.spec.len) != A cols $(A.dims[2])"
 
-    consistent!(x, A.ghost_exchange, A.row_spec)
+    scatter!(x, A.ghost_exchange, A.row_spec)
 
     @sync for d in 1:x.spec.ndevices
         @async begin
@@ -27,7 +27,7 @@ function LinearAlgebra.mul!(
     @assert y.spec.len == A.dims[1] "y length $(y.spec.len) != A rows $(A.dims[1])"
     @assert x.spec.len == A.dims[2] "x length $(x.spec.len) != A cols $(A.dims[2])"
 
-    consistent!(x, A.ghost_exchange, A.row_spec)
+    scatter!(x, A.ghost_exchange, A.row_spec)
 
     @sync for d in 1:x.spec.ndevices
         @async begin

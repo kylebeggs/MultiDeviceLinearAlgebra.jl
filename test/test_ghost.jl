@@ -1,4 +1,8 @@
-using MultiDeviceLinearAlgebra: _compute_ghost_map, _remap_colval
+using Test
+using SparseArrays
+using LinearAlgebra
+using MultiDeviceLinearAlgebra
+using MultiDeviceLinearAlgebra: _compute_ghost_map, _compute_ghost_topology, _remap_colval
 
 function _to_csr(A::SparseArrays.SparseMatrixCSC)
     At = SparseMatrixCSC(sparse(A'))
@@ -197,6 +201,68 @@ end
                     end
                 end
             end
+        end
+    end
+
+    @testset "_compute_ghost_topology" begin
+        @testset "Round-trip against _compute_ghost_map" begin
+            n = 12
+            A = spdiagm(-1 => ones(n - 1), 0 => 2 * ones(n), 1 => ones(n - 1))
+            rowptr, colval = _to_csr(A)
+
+            for ndev in [2, 3, 4]
+                spec = compute_partition_ranges(n, ndev)
+                ggi, nbrs_map, sli_map, rgo_map = _compute_ghost_map(rowptr, colval, spec)
+                nbrs_topo, sli_topo, rgo_topo = _compute_ghost_topology(ggi, spec)
+
+                @test nbrs_topo == nbrs_map
+                @test sli_topo == sli_map
+                @test rgo_topo == rgo_map
+            end
+        end
+
+        @testset "Poisson stencil round-trip" begin
+            nx = 4
+            n = nx * nx
+            A = poisson_matrix_2d(nx, nx)
+            rowptr, colval = _to_csr(A)
+            spec = compute_partition_ranges(n, 2)
+
+            ggi, nbrs_map, sli_map, rgo_map = _compute_ghost_map(rowptr, colval, spec)
+            nbrs_topo, sli_topo, rgo_topo = _compute_ghost_topology(ggi, spec)
+
+            @test nbrs_topo == nbrs_map
+            @test sli_topo == sli_map
+            @test rgo_topo == rgo_map
+        end
+
+        @testset "No ghosts" begin
+            spec = compute_partition_ranges(8, 2)
+            ggi = [Int[], Int[]]
+            nbrs, sli, rgo = _compute_ghost_topology(ggi, spec)
+
+            @test nbrs == [Int[], Int[]]
+            @test sli == [Vector{Int}[], Vector{Int}[]]
+            @test rgo == [UnitRange{Int}[], UnitRange{Int}[]]
+        end
+    end
+
+    @testset "GhostExchange constructor validation" begin
+        @testset "Wrong number of devices" begin
+            spec = compute_partition_ranges(10, 2)
+            @test_throws ArgumentError GhostExchange([[6], [4], [1]], spec, Float64)
+        end
+
+        @testset "Ghost index out of range" begin
+            spec = compute_partition_ranges(10, 2)
+            @test_throws BoundsError GhostExchange([[11], Int[]], spec, Float64)
+            @test_throws BoundsError GhostExchange([[0], Int[]], spec, Float64)
+        end
+
+        @testset "Ghost index in owned range" begin
+            spec = compute_partition_ranges(10, 2)
+            # Device 1 owns 1:5, ghost index 3 is in owned range
+            @test_throws ArgumentError GhostExchange([[3], Int[]], spec, Float64)
         end
     end
 end

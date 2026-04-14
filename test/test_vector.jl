@@ -134,4 +134,64 @@
         lmul!(s, v_md)
         @test gather(v_md) ≈ expected rtol=1e-12
     end
+
+    @testset "ghost_exchange defaults to nothing" begin
+        v_md = MultiDeviceVector(randn(n); ndevices=ndev)
+        @test v_md.ghost_exchange === nothing
+
+        spec = compute_partition_ranges(n, ndev)
+        v_md2 = MultiDeviceVector{Float64}(undef, spec)
+        @test v_md2.ghost_exchange === nothing
+    end
+
+    @testset "Construction with GhostExchange" begin
+        ndev >= 2 || return
+        spec = compute_partition_ranges(n, ndev)
+        ggi = _neighbor_ghost_indices(spec)
+        ghost = GhostExchange(ggi, spec, Float64)
+
+        v_cpu = randn(n)
+        v_md = MultiDeviceVector(v_cpu, spec, ghost)
+        @test v_md.ghost_exchange === ghost
+        @test gather(v_md) ≈ v_cpu
+    end
+
+    @testset "attach_ghost" begin
+        ndev >= 2 || return
+        spec = compute_partition_ranges(n, ndev)
+        ggi = _neighbor_ghost_indices(spec)
+        ghost = GhostExchange(ggi, spec, Float64)
+
+        v_cpu = randn(n)
+        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
+        @test v_md.ghost_exchange === nothing
+
+        v_with = attach_ghost(v_md, ghost)
+        @test v_with.ghost_exchange === ghost
+        @test gather(v_with) ≈ gather(v_md)
+    end
+
+    @testset "attach_ghost from index lists" begin
+        ndev >= 2 || return
+        spec = compute_partition_ranges(n, ndev)
+        ggi = _neighbor_ghost_indices(spec)
+
+        v_md = MultiDeviceVector(randn(n); ndevices=ndev)
+        v_with = attach_ghost(v_md, ggi)
+        @test v_with.ghost_exchange isa GhostExchange
+        @test gather(v_with) ≈ gather(v_md)
+    end
+
+    @testset "similar does not propagate ghost_exchange" begin
+        ndev >= 2 || return
+        spec = compute_partition_ranges(n, ndev)
+        ggi = _neighbor_ghost_indices(spec)
+        ghost = GhostExchange(ggi, spec, Float64)
+
+        v_md = MultiDeviceVector(randn(n), spec, ghost)
+        @test v_md.ghost_exchange === ghost
+
+        w = similar(v_md)
+        @test w.ghost_exchange === nothing
+    end
 end

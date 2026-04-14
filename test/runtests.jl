@@ -16,8 +16,21 @@ include("test_ghost.jl")
 include("test_poisson.jl")
 
 # GPU tests require CUDA
+"""Helper: build neighbor-boundary ghost indices for testing."""
+function _neighbor_ghost_indices(spec)
+    ggi = Vector{Vector{Int}}(undef, spec.ndevices)
+    for d in 1:spec.ndevices
+        ghosts = Int[]
+        d > 1 && push!(ghosts, last(spec.ranges[d - 1]))
+        d < spec.ndevices && push!(ghosts, first(spec.ranges[d + 1]))
+        ggi[d] = sort!(ghosts)
+    end
+    return ggi
+end
+
 if HAS_CUDA && NGPUS >= 1
     @info "Running GPU tests with $NGPUS device(s)"
+    include("test_ghost_exchange.jl")
     include("test_vector.jl")
     include("test_broadcast.jl")
     include("test_matrix.jl")
