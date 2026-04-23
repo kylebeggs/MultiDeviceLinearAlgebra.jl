@@ -7,7 +7,7 @@ function gather(v::MultiDeviceVector{T}) where {T}
     return result
 end
 
-function gather(A::MultiDeviceSparseMatrixCSR{Tv,Ti}) where {Tv,Ti}
+function gather(A::MultiDeviceSparseMatrixCSR{Tv, Ti}) where {Tv, Ti}
     nrows, ncols = A.dims
     I_indices = Ti[]
     J_indices = Ti[]

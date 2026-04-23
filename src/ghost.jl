@@ -5,13 +5,13 @@ Compute ghost communication topology from per-device ghost index lists.
 Returns `(neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse)`.
 """
 function _compute_ghost_topology(
-    ghost_global_indices::Vector{Vector{Int}},
-    spec::PartitionSpec,
-)
+        ghost_global_indices::Vector{Vector{Int}},
+        spec::PartitionSpec,
+    )
     ndevices = spec.ndevices
 
     # ghost_by_owner[d][owner] = sorted global indices that device d needs from owner
-    ghost_by_owner = [Dict{Int,Vector{Int}}() for _ in 1:ndevices]
+    ghost_by_owner = [Dict{Int, Vector{Int}}() for _ in 1:ndevices]
     for d in 1:ndevices
         for g in ghost_global_indices[d]
             owner, _ = device_for_index(spec, g)
@@ -21,7 +21,7 @@ function _compute_ghost_topology(
     end
 
     # needs_from[d][requester] = global indices that requester needs from device d
-    needs_from = [Dict{Int,Vector{Int}}() for _ in 1:ndevices]
+    needs_from = [Dict{Int, Vector{Int}}() for _ in 1:ndevices]
     for d in 1:ndevices
         for (owner, indices) in ghost_by_owner[d]
             needs_from[owner][d] = indices
@@ -78,10 +78,10 @@ Discover ghost indices from CSR sparsity pattern, then compute communication top
 Returns `(ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse)`.
 """
 function _compute_ghost_map(
-    csr_rowptr::AbstractVector{Ti},
-    csr_colval::AbstractVector{Ti},
-    row_spec::PartitionSpec,
-) where {Ti<:Integer}
+        csr_rowptr::AbstractVector{Ti},
+        csr_colval::AbstractVector{Ti},
+        row_spec::PartitionSpec,
+    ) where {Ti <: Integer}
     ndevices = row_spec.ndevices
     ghost_global_indices = Vector{Vector{Int}}(undef, ndevices)
 
@@ -113,14 +113,14 @@ Remap global column indices to local numbering.
 Owned columns map to `1:n_owned`, ghost columns to `(n_owned+1):(n_owned+n_ghost)`.
 """
 function _remap_colval(
-    local_colval::AbstractVector{Ti},
-    owned_range::UnitRange{Int},
-    ghost_global_indices::Vector{Int},
-) where {Ti<:Integer}
+        local_colval::AbstractVector{Ti},
+        owned_range::UnitRange{Int},
+        ghost_global_indices::Vector{Int},
+    ) where {Ti <: Integer}
     owned_first = first(owned_range)
     n_owned = length(owned_range)
 
-    ghost_to_local = Dict{Int,Ti}()
+    ghost_to_local = Dict{Int, Ti}()
     for (i, g) in enumerate(ghost_global_indices)
         ghost_to_local[g] = Ti(n_owned + i)
     end
@@ -154,7 +154,7 @@ between devices. Used by [`scatter!`](@ref) (owner→ghost) and [`reduce!`](@ref
 - `send_indices_gpu` — GPU-side copies of send index arrays for gather operations
 - `local_x` — per-device extended vectors (`[owned | ghost]`) used during communication
 """
-struct GhostExchange{Tv,V<:AbstractVector{Tv},VI<:AbstractVector{Int}}
+struct GhostExchange{Tv, V <: AbstractVector{Tv}, VI <: AbstractVector{Int}}
     ghost_global_indices::Vector{Vector{Int}}
     neighbors::Vector{Vector{Int}}
     send_local_indices::Vector{Vector{Vector{Int}}}
@@ -167,14 +167,14 @@ struct GhostExchange{Tv,V<:AbstractVector{Tv},VI<:AbstractVector{Int}}
 end
 
 function GhostExchange(
-    ghost_global_indices::Vector{Vector{Int}},
-    neighbors::Vector{Vector{Int}},
-    send_local_indices::Vector{Vector{Vector{Int}}},
-    recv_ghost_offsets::Vector{Vector{UnitRange{Int}}},
-    neighbor_reverse::Vector{Vector{Int}},
-    row_spec::PartitionSpec,
-    ::Type{Tv},
-) where {Tv}
+        ghost_global_indices::Vector{Vector{Int}},
+        neighbors::Vector{Vector{Int}},
+        send_local_indices::Vector{Vector{Vector{Int}}},
+        recv_ghost_offsets::Vector{Vector{UnitRange{Int}}},
+        neighbor_reverse::Vector{Vector{Int}},
+        row_spec::PartitionSpec,
+        ::Type{Tv},
+    ) where {Tv}
     ndevices = row_spec.ndevices
 
     send_buffers = Vector{Vector{CuVector{Tv}}}(undef, ndevices)
@@ -191,20 +191,20 @@ function GhostExchange(
 
             send_buffers[d] = CuVector{Tv}[
                 CuVector{Tv}(undef, length(send_local_indices[d][k]))
-                for k in eachindex(neighbors[d])
+                    for k in eachindex(neighbors[d])
             ]
             recv_buffers[d] = CuVector{Tv}[
                 CuVector{Tv}(undef, length(recv_ghost_offsets[d][k]))
-                for k in eachindex(neighbors[d])
+                    for k in eachindex(neighbors[d])
             ]
             send_indices_gpu[d] = CuVector{Int}[
                 CuVector{Int}(send_local_indices[d][k])
-                for k in eachindex(neighbors[d])
+                    for k in eachindex(neighbors[d])
             ]
         end
     end
 
-    return GhostExchange{Tv,CuVector{Tv},CuVector{Int}}(
+    return GhostExchange{Tv, CuVector{Tv}, CuVector{Int}}(
         ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
         neighbor_reverse, send_buffers, recv_buffers, send_indices_gpu, local_x,
     )
@@ -218,10 +218,10 @@ of any matrix. Each `ghost_global_indices[d]` is a sorted vector of global indic
 device `d` needs as ghosts.
 """
 function GhostExchange(
-    ghost_global_indices::AbstractVector{<:AbstractVector{Int}},
-    spec::PartitionSpec,
-    ::Type{Tv},
-) where {Tv}
+        ghost_global_indices::AbstractVector{<:AbstractVector{Int}},
+        spec::PartitionSpec,
+        ::Type{Tv},
+    ) where {Tv}
     length(ghost_global_indices) == spec.ndevices || throw(
         ArgumentError(
             "Length of ghost_global_indices ($(length(ghost_global_indices))) must equal ndevices ($(spec.ndevices))"
@@ -256,7 +256,7 @@ Create a new [`GhostExchange`](@ref) that shares the same topology (neighbor lis
 mappings) but allocates independent GPU communication buffers. Used by `similar` to give
 each vector its own scratch space for [`scatter!`](@ref) / [`reduce!`](@ref).
 """
-function copy_exchange(ghost::GhostExchange{Tv,V,VI}, spec::PartitionSpec) where {Tv,V,VI}
+function copy_exchange(ghost::GhostExchange{Tv, V, VI}, spec::PartitionSpec) where {Tv, V, VI}
     ndevices = length(ghost.local_x)
     send_buffers = Vector{Vector{V}}(undef, ndevices)
     recv_buffers = Vector{Vector{V}}(undef, ndevices)
@@ -271,7 +271,7 @@ function copy_exchange(ghost::GhostExchange{Tv,V,VI}, spec::PartitionSpec) where
         end
     end
 
-    return GhostExchange{Tv,V,VI}(
+    return GhostExchange{Tv, V, VI}(
         ghost.ghost_global_indices,
         ghost.neighbors,
         ghost.send_local_indices,
@@ -293,9 +293,9 @@ Return a new `MultiDeviceVector` that shares the same partition data but carries
 [`GhostExchange`](@ref), enabling self-contained [`scatter!`](@ref) and [`reduce!`](@ref).
 """
 function attach_ghost(
-    v::MultiDeviceVector{T,VP,P}, ghost::GhostExchange{T}
-) where {T,VP,P}
-    return MultiDeviceVector{T,VP,P,typeof(ghost)}(v.partitions, v.spec, ghost)
+        v::MultiDeviceVector{T, VP, P}, ghost::GhostExchange{T}
+    ) where {T, VP, P}
+    return MultiDeviceVector{T, VP, P, typeof(ghost)}(v.partitions, v.spec, ghost)
 end
 
 """
@@ -305,8 +305,8 @@ Build a [`GhostExchange`](@ref) from per-device ghost index lists and attach it 
 Creates fresh GPU buffers (no aliasing with other exchanges).
 """
 function attach_ghost(
-    v::MultiDeviceVector{T}, ghost_global_indices::AbstractVector{<:AbstractVector{Int}}
-) where {T}
+        v::MultiDeviceVector{T}, ghost_global_indices::AbstractVector{<:AbstractVector{Int}}
+    ) where {T}
     ghost = GhostExchange(ghost_global_indices, v.spec, T)
     return attach_ghost(v, ghost)
 end
@@ -317,14 +317,16 @@ end
 Owner→ghost exchange using the vector's own [`GhostExchange`](@ref). The vector must have
 been constructed with a ghost exchange (see [`attach_ghost`](@ref)).
 """
-function scatter!(x::MultiDeviceVector{Tv,VP,P,GE}) where {Tv,VP,P,GE<:GhostExchange}
+function scatter!(x::MultiDeviceVector{Tv, VP, P, GE}) where {Tv, VP, P, GE <: GhostExchange}
     return scatter!(x, x.ghost_exchange, x.spec)
 end
 
-function scatter!(::MultiDeviceVector{Tv,VP,P,Nothing}) where {Tv,VP,P}
-    throw(ArgumentError(
-        "scatter! requires a GhostExchange; use attach_ghost(x, ghost) first, or call scatter!(x, ghost, spec)"
-    ))
+function scatter!(::MultiDeviceVector{Tv, VP, P, Nothing}) where {Tv, VP, P}
+    throw(
+        ArgumentError(
+            "scatter! requires a GhostExchange; use attach_ghost(x, ghost) first, or call scatter!(x, ghost, spec)"
+        )
+    )
 end
 
 """
@@ -334,10 +336,10 @@ Owner→ghost exchange: pack owned data into send buffers, transfer between devi
 and assemble `local_x = [owned | ghost]` on each device.
 """
 function scatter!(
-    x::MultiDeviceVector{Tv},
-    ghost::GhostExchange{Tv},
-    row_spec::PartitionSpec,
-) where {Tv}
+        x::MultiDeviceVector{Tv},
+        ghost::GhostExchange{Tv},
+        row_spec::PartitionSpec,
+    ) where {Tv}
     ndevices = row_spec.ndevices
 
     # Phase 1: Pack send buffers (gather owned values at send indices)
@@ -353,7 +355,7 @@ function scatter!(
     end
 
     # Phase 2: P2P transfer into recv buffers and assemble local_x
-    @sync for d in 1:ndevices
+    return @sync for d in 1:ndevices
         @async begin
             CUDA.device!(device_id(row_spec, d))
             n_owned = length(row_spec.ranges[d])
@@ -383,15 +385,17 @@ Ghost→owner reduction using the vector's own [`GhostExchange`](@ref). The vect
 been constructed with a ghost exchange (see [`attach_ghost`](@ref)).
 """
 function reduce!(
-    x::MultiDeviceVector{Tv,VP,P,GE}, op::F
-) where {Tv,VP,P,GE<:GhostExchange,F<:Function}
+        x::MultiDeviceVector{Tv, VP, P, GE}, op::F
+    ) where {Tv, VP, P, GE <: GhostExchange, F <: Function}
     return reduce!(x, x.ghost_exchange, x.spec, op)
 end
 
-function reduce!(::MultiDeviceVector{Tv,VP,P,Nothing}, ::F) where {Tv,VP,P,F<:Function}
-    throw(ArgumentError(
-        "reduce! requires a GhostExchange; use attach_ghost(x, ghost) first, or call reduce!(x, ghost, spec, op)"
-    ))
+function reduce!(::MultiDeviceVector{Tv, VP, P, Nothing}, ::F) where {Tv, VP, P, F <: Function}
+    throw(
+        ArgumentError(
+            "reduce! requires a GhostExchange; use attach_ghost(x, ghost) first, or call reduce!(x, ghost, spec, op)"
+        )
+    )
 end
 
 """
@@ -405,11 +409,11 @@ The caller is responsible for populating `ghost.local_x[d]` (the `[owned | ghost
 vector) before calling `reduce!`.
 """
 function reduce!(
-    x::MultiDeviceVector{Tv},
-    ghost::GhostExchange{Tv},
-    spec::PartitionSpec,
-    op::F,
-) where {Tv,F<:Function}
+        x::MultiDeviceVector{Tv},
+        ghost::GhostExchange{Tv},
+        spec::PartitionSpec,
+        op::F,
+    ) where {Tv, F <: Function}
     ndevices = spec.ndevices
 
     # Phase 1: Copy owned portion from local_x into x, and pack ghost contributions

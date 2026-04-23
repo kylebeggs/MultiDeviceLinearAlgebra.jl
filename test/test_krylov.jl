@@ -7,20 +7,20 @@
             x_true = randn(n)
             b_cpu = A_cpu * x_true
 
-            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-            b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+            b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
-            x_md, stats = Krylov.cg(A_md, b_md; atol=1e-12, rtol=1e-12)
+            x_md, stats = Krylov.cg(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
 
             @test stats.solved
             x_result = gather(x_md)
-            @test x_result ≈ x_true rtol=1e-6
+            @test x_result ≈ x_true rtol = 1.0e-6
 
             # Verify residual
             y_md = similar(b_md)
             mul!(y_md, A_md, x_md)
             r = gather(y_md) - b_cpu
-            @test norm(r) / norm(b_cpu) < 1e-10
+            @test norm(r) / norm(b_cpu) < 1.0e-10
         end
 
         @testset "mdla_solve convenience function" begin
@@ -30,12 +30,12 @@
             x_true = randn(n)
             b_cpu = A_cpu * x_true
 
-            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-            b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+            b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
-            x_md, stats = mdla_solve(A_md, b_md; atol=1e-12, rtol=1e-12)
+            x_md, stats = mdla_solve(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
             @test stats.solved
-            @test gather(x_md) ≈ x_true rtol=1e-6
+            @test gather(x_md) ≈ x_true rtol = 1.0e-6
         end
     end
 end
@@ -50,14 +50,14 @@ end
         x_true = randn(n)
         b_cpu = A_cpu * x_true
 
-        A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-        b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+        A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+        b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
         prob = LinearProblem(A_md, b_md)
-        sol = solve(prob, KrylovJL_CG(); abstol=1e-12, reltol=1e-12)
+        sol = solve(prob, KrylovJL_CG(); abstol = 1.0e-12, reltol = 1.0e-12)
 
         x_result = gather(sol.u)
-        @test x_result ≈ x_true rtol=1e-6
+        @test x_result ≈ x_true rtol = 1.0e-6
     end
 end
 
@@ -70,10 +70,10 @@ end
 
     iter_counts = Int[]
     for ndev in 1:min(NGPUS, 4)
-        A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-        b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+        A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+        b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
-        _, stats = Krylov.cg(A_md, b_md; atol=1e-12, rtol=1e-12)
+        _, stats = Krylov.cg(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
         @test stats.solved
         push!(iter_counts, stats.niter)
     end

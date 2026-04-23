@@ -1,4 +1,4 @@
-function poisson_matrix_2d(nx::Int, ny::Int; T::Type=Float64)
+function poisson_matrix_2d(nx::Int, ny::Int; T::Type = Float64)
     hx = one(T) / (nx + 1)
     hy = one(T) / (ny + 1)
 

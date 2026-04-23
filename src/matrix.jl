@@ -11,16 +11,16 @@ values are exchanged via the embedded [`GhostExchange`](@ref) before each SpMV.
 - `row_spec::P` — [`PartitionSpec`](@ref) describing the row distribution
 - `dims::Tuple{Int,Int}` — global matrix dimensions `(nrows, ncols)`
 """
-struct MultiDeviceSparseMatrixCSR{Tv,Ti,GE,VP<:AbstractVector{<:CuSparseMatrixCSR{Tv,Ti}},P<:PartitionSpec} <: AbstractMatrix{Tv}
+struct MultiDeviceSparseMatrixCSR{Tv, Ti, GE, VP <: AbstractVector{<:CuSparseMatrixCSR{Tv, Ti}}, P <: PartitionSpec} <: AbstractMatrix{Tv}
     partitions::VP
     ghost_exchange::GE
     row_spec::P
-    dims::Tuple{Int,Int}
+    dims::Tuple{Int, Int}
 end
 
 function MultiDeviceSparseMatrixCSR(
-    A::SparseMatrixCSC{Tv,Ti}; ndevices::Int=length(CUDA.devices())
-) where {Tv,Ti}
+        A::SparseMatrixCSC{Tv, Ti}; ndevices::Int = length(CUDA.devices())
+    ) where {Tv, Ti}
     nrows = size(A, 1)
     @assert ndevices <= nrows "More devices ($ndevices) than rows ($nrows)"
     row_spec = compute_partition_ranges(nrows, ndevices)
@@ -28,18 +28,18 @@ function MultiDeviceSparseMatrixCSR(
 end
 
 function MultiDeviceSparseMatrixCSR(
-    A::SparseMatrixCSC{Tv,Ti}, row_spec::PartitionSpec
-) where {Tv,Ti}
+        A::SparseMatrixCSC{Tv, Ti}, row_spec::PartitionSpec
+    ) where {Tv, Ti}
     nrows, ncols = size(A)
 
-    validated = PartitionSpec(row_spec.ranges; devices=collect(Int, row_spec.devices))
+    validated = PartitionSpec(row_spec.ranges; devices = collect(Int, row_spec.devices))
     validated.len == nrows || throw(
         DimensionMismatch("PartitionSpec covers $(validated.len) rows but matrix has $nrows")
     )
     validated.ndevices == row_spec.ndevices || throw(
         ArgumentError(
             "Inconsistent PartitionSpec: ndevices=$(row_spec.ndevices) but " *
-            "length(ranges)=$(validated.ndevices)",
+                "length(ranges)=$(validated.ndevices)",
         ),
     )
     row_spec = validated
@@ -53,7 +53,7 @@ function MultiDeviceSparseMatrixCSR(
     ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
         neighbor_reverse = _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
 
-    partitions = Vector{CuSparseMatrixCSR{Tv,Ti}}(undef, ndevices)
+    partitions = Vector{CuSparseMatrixCSR{Tv, Ti}}(undef, ndevices)
 
     @sync for d in 1:ndevices
         @async begin
@@ -77,7 +77,7 @@ function MultiDeviceSparseMatrixCSR(
             d_nzval = CuVector{Tv}(local_nzval)
 
             local_ncols = n_owned + n_ghost
-            partitions[d] = CuSparseMatrixCSR{Tv,Ti}(
+            partitions[d] = CuSparseMatrixCSR{Tv, Ti}(
                 d_rowptr, d_colval, d_nzval, (local_nrows, local_ncols)
             )
         end
@@ -88,7 +88,7 @@ function MultiDeviceSparseMatrixCSR(
         neighbor_reverse, row_spec, Tv,
     )
 
-    return MultiDeviceSparseMatrixCSR{Tv,Ti,typeof(ghost_exchange),typeof(partitions),typeof(row_spec)}(
+    return MultiDeviceSparseMatrixCSR{Tv, Ti, typeof(ghost_exchange), typeof(partitions), typeof(row_spec)}(
         partitions, ghost_exchange, row_spec, (nrows, ncols)
     )
 end

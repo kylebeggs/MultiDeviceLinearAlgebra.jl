@@ -4,7 +4,7 @@
 
     @testset "Construction and gather round-trip" begin
         v_cpu = randn(Float64, n)
-        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
+        v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
 
         @test length(v_md) == n
         @test size(v_md) == (n,)
@@ -31,7 +31,7 @@
 
     @testset "similar preserves spec" begin
         v_cpu = randn(Float64, n)
-        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
+        v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
         w = similar(v_md)
         @test length(w) == n
         @test w.spec.ndevices == ndev
@@ -40,7 +40,7 @@
     end
 
     @testset "similar with different type" begin
-        v_md = MultiDeviceVector(randn(Float64, n); ndevices=ndev)
+        v_md = MultiDeviceVector(randn(Float64, n); ndevices = ndev)
         w = similar(v_md, Float32)
         @test eltype(w) == Float32
         @test w.spec.ranges == v_md.spec.ranges
@@ -48,7 +48,7 @@
 
     @testset "Scalar getindex/setindex!" begin
         v_cpu = collect(1.0:10.0)
-        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
+        v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
         for i in 1:10
             @test v_md[i] ≈ Float64(i)
         end
@@ -57,7 +57,7 @@
     end
 
     @testset "fill!" begin
-        v_md = MultiDeviceVector(zeros(n); ndevices=ndev)
+        v_md = MultiDeviceVector(zeros(n); ndevices = ndev)
         fill!(v_md, 3.14)
         result = gather(v_md)
         @test all(x -> x ≈ 3.14, result)
@@ -65,14 +65,14 @@
 
     @testset "copyto!" begin
         a_cpu = randn(n)
-        a_md = MultiDeviceVector(a_cpu; ndevices=ndev)
+        a_md = MultiDeviceVector(a_cpu; ndevices = ndev)
         b_md = similar(a_md)
         copyto!(b_md, a_md)
         @test gather(b_md) ≈ a_cpu
     end
 
     @testset "zero" begin
-        v_md = MultiDeviceVector(randn(n); ndevices=ndev)
+        v_md = MultiDeviceVector(randn(n); ndevices = ndev)
         z = zero(v_md)
         @test all(x -> x == 0.0, gather(z))
         @test z.spec.ranges == v_md.spec.ranges
@@ -81,15 +81,15 @@
     @testset "dot" begin
         x_cpu = randn(n)
         y_cpu = randn(n)
-        x_md = MultiDeviceVector(x_cpu; ndevices=ndev)
-        y_md = MultiDeviceVector(y_cpu; ndevices=ndev)
-        @test dot(x_md, y_md) ≈ dot(x_cpu, y_cpu) rtol=1e-12
+        x_md = MultiDeviceVector(x_cpu; ndevices = ndev)
+        y_md = MultiDeviceVector(y_cpu; ndevices = ndev)
+        @test dot(x_md, y_md) ≈ dot(x_cpu, y_cpu) rtol = 1.0e-12
     end
 
     @testset "norm" begin
         v_cpu = randn(n)
-        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
-        @test norm(v_md) ≈ norm(v_cpu) rtol=1e-12
+        v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
+        @test norm(v_md) ≈ norm(v_cpu) rtol = 1.0e-12
     end
 
     @testset "axpy!" begin
@@ -98,10 +98,10 @@
         y_cpu = randn(n)
         expected = y_cpu + α * x_cpu
 
-        x_md = MultiDeviceVector(x_cpu; ndevices=ndev)
-        y_md = MultiDeviceVector(copy(y_cpu); ndevices=ndev)
+        x_md = MultiDeviceVector(x_cpu; ndevices = ndev)
+        y_md = MultiDeviceVector(copy(y_cpu); ndevices = ndev)
         axpy!(α, x_md, y_md)
-        @test gather(y_md) ≈ expected rtol=1e-12
+        @test gather(y_md) ≈ expected rtol = 1.0e-12
     end
 
     @testset "axpby!" begin
@@ -111,32 +111,32 @@
         y_cpu = randn(n)
         expected = α * x_cpu + β * y_cpu
 
-        x_md = MultiDeviceVector(x_cpu; ndevices=ndev)
-        y_md = MultiDeviceVector(copy(y_cpu); ndevices=ndev)
+        x_md = MultiDeviceVector(x_cpu; ndevices = ndev)
+        y_md = MultiDeviceVector(copy(y_cpu); ndevices = ndev)
         axpby!(α, x_md, β, y_md)
-        @test gather(y_md) ≈ expected rtol=1e-12
+        @test gather(y_md) ≈ expected rtol = 1.0e-12
     end
 
     @testset "rmul!" begin
         s = 3.7
         v_cpu = randn(n)
         expected = s * v_cpu
-        v_md = MultiDeviceVector(copy(v_cpu); ndevices=ndev)
+        v_md = MultiDeviceVector(copy(v_cpu); ndevices = ndev)
         rmul!(v_md, s)
-        @test gather(v_md) ≈ expected rtol=1e-12
+        @test gather(v_md) ≈ expected rtol = 1.0e-12
     end
 
     @testset "lmul!" begin
         s = -1.2
         v_cpu = randn(n)
         expected = s * v_cpu
-        v_md = MultiDeviceVector(copy(v_cpu); ndevices=ndev)
+        v_md = MultiDeviceVector(copy(v_cpu); ndevices = ndev)
         lmul!(s, v_md)
-        @test gather(v_md) ≈ expected rtol=1e-12
+        @test gather(v_md) ≈ expected rtol = 1.0e-12
     end
 
     @testset "ghost_exchange defaults to nothing" begin
-        v_md = MultiDeviceVector(randn(n); ndevices=ndev)
+        v_md = MultiDeviceVector(randn(n); ndevices = ndev)
         @test v_md.ghost_exchange === nothing
 
         spec = compute_partition_ranges(n, ndev)
@@ -163,7 +163,7 @@
         ghost = GhostExchange(ggi, spec, Float64)
 
         v_cpu = randn(n)
-        v_md = MultiDeviceVector(v_cpu; ndevices=ndev)
+        v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
         @test v_md.ghost_exchange === nothing
 
         v_with = attach_ghost(v_md, ghost)
@@ -176,7 +176,7 @@
         spec = compute_partition_ranges(n, ndev)
         ggi = _neighbor_ghost_indices(spec)
 
-        v_md = MultiDeviceVector(randn(n); ndevices=ndev)
+        v_md = MultiDeviceVector(randn(n); ndevices = ndev)
         v_with = attach_ghost(v_md, ggi)
         @test v_with.ghost_exchange isa GhostExchange
         @test gather(v_with) ≈ gather(v_md)
