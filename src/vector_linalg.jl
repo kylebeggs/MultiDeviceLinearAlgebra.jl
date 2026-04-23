@@ -32,7 +32,7 @@ function LinearAlgebra.dot(x::MultiDeviceVector{T}, y::MultiDeviceVector{T}) whe
     return sum(partial)
 end
 
-function LinearAlgebra.norm(v::MultiDeviceVector{T}) where {T<:Real}
+function LinearAlgebra.norm(v::MultiDeviceVector{T}) where {T <: Real}
     partial = Vector{T}(undef, v.spec.ndevices)
     @sync for d in 1:v.spec.ndevices
         @async begin
@@ -43,7 +43,7 @@ function LinearAlgebra.norm(v::MultiDeviceVector{T}) where {T<:Real}
     return sqrt(sum(partial))
 end
 
-function LinearAlgebra.norm(v::MultiDeviceVector{T}) where {T<:Complex}
+function LinearAlgebra.norm(v::MultiDeviceVector{T}) where {T <: Complex}
     R = real(T)
     partial = Vector{R}(undef, v.spec.ndevices)
     @sync for d in 1:v.spec.ndevices

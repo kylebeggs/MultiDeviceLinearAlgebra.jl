@@ -9,7 +9,7 @@ Immutable metadata describing how indices are partitioned across GPU devices.
 - `ndevices::Int` — number of devices
 - `devices::D` — 0-indexed CUDA device IDs for each partition
 """
-struct PartitionSpec{R<:AbstractVector{UnitRange{Int}},D<:AbstractVector{Int}}
+struct PartitionSpec{R <: AbstractVector{UnitRange{Int}}, D <: AbstractVector{Int}}
     ranges::R
     len::Int
     ndevices::Int
@@ -30,14 +30,14 @@ function _validate_devices(devices::AbstractVector{Int}, ndevices::Int)
     all(>=(0), devices) || throw(
         ArgumentError("All device IDs must be non-negative, got $devices")
     )
-    length(unique(devices)) == length(devices) || throw(
+    return length(unique(devices)) == length(devices) || throw(
         ArgumentError("Device IDs must be unique, got $devices")
     )
 end
 
 function PartitionSpec(
-    ranges::AbstractVector{<:UnitRange{<:Integer}}; devices::Union{Nothing,AbstractVector{Int}}=nothing
-)
+        ranges::AbstractVector{<:UnitRange{<:Integer}}; devices::Union{Nothing, AbstractVector{Int}} = nothing
+    )
     isempty(ranges) && throw(ArgumentError("Ranges vector must be non-empty"))
 
     vranges = Vector{UnitRange{Int}}(undef, length(ranges))
@@ -51,7 +51,7 @@ function PartitionSpec(
     first(vranges[1]) == 1 || throw(ArgumentError("First range must start at 1, got $(first(vranges[1]))"))
     for i in 1:(length(vranges) - 1)
         if last(vranges[i]) + 1 != first(vranges[i + 1])
-            throw(ArgumentError("Ranges $i and $(i+1) are not contiguous: $(vranges[i]) and $(vranges[i+1])"))
+            throw(ArgumentError("Ranges $i and $(i + 1) are not contiguous: $(vranges[i]) and $(vranges[i + 1])"))
         end
     end
     ndevices = length(vranges)
@@ -63,7 +63,7 @@ function PartitionSpec(
     end
 end
 
-function compute_partition_ranges(n::Int, ndevices::Int; devices::Union{Nothing,AbstractVector{Int}}=nothing)
+function compute_partition_ranges(n::Int, ndevices::Int; devices::Union{Nothing, AbstractVector{Int}} = nothing)
     @assert n > 0 "Length must be positive, got $n"
     @assert ndevices > 0 "Number of devices must be positive, got $ndevices"
     @assert ndevices <= n "More devices ($ndevices) than elements ($n)"
@@ -88,7 +88,7 @@ function compute_partition_ranges(n::Int, ndevices::Int; devices::Union{Nothing,
 end
 
 function compute_partition_ranges(n::Int; devices::AbstractVector{Int})
-    return compute_partition_ranges(n, length(devices); devices=devices)
+    return compute_partition_ranges(n, length(devices); devices = devices)
 end
 
 function device_for_index(spec::PartitionSpec, i::Int)

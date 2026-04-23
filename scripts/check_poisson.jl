@@ -30,10 +30,10 @@ println()
 all_passed = true
 
 for ndev in 1:ngpus
-    A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-    b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+    A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+    b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
-    x_md, stats = mdla_solve(A_md, b_md; atol=1e-12, rtol=1e-12)
+    x_md, stats = mdla_solve(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
 
     u_num = gather(x_md)
     fd_err = norm(u_num - u_exact, Inf)
@@ -43,11 +43,13 @@ for ndev in 1:ngpus
     rel_res = norm(gather(y_md) - b_cpu) / norm(b_cpu)
 
     converged = stats.solved
-    passed = converged && rel_res < 1e-8
+    passed = converged && rel_res < 1.0e-8
 
     status = passed ? "PASS" : "FAIL"
-    @printf("  %d GPU(s): [%s]  converged=%s  fd_error=%.2e  rel_residual=%.2e  iters=%d\n",
-        ndev, status, converged, fd_err, rel_res, stats.niter)
+    @printf(
+        "  %d GPU(s): [%s]  converged=%s  fd_error=%.2e  rel_residual=%.2e  iters=%d\n",
+        ndev, status, converged, fd_err, rel_res, stats.niter
+    )
 
     if !passed
         global all_passed = false

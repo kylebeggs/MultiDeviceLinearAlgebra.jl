@@ -61,10 +61,10 @@ if HAS_CUDA && NGPUS >= 1
                 u_exact[idx] = sin(π * x) * sin(π * y)
             end
 
-            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices=ndev)
-            b_md = MultiDeviceVector(b_cpu; ndevices=ndev)
+            A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
+            b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 
-            x_md, stats = mdla_solve(A_md, b_md; atol=1e-12, rtol=1e-12)
+            x_md, stats = mdla_solve(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
             @test stats.solved
 
             u_gpu = gather(x_md)
@@ -74,7 +74,7 @@ if HAS_CUDA && NGPUS >= 1
             y_md = similar(b_md)
             mul!(y_md, A_md, x_md)
             residual = norm(gather(y_md) - b_cpu) / norm(b_cpu)
-            @test residual < 1e-10
+            @test residual < 1.0e-10
         end
     end
 end

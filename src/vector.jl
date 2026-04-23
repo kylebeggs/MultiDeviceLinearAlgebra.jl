@@ -12,8 +12,8 @@ exchange).
 - `spec::P` — [`PartitionSpec`](@ref) describing the index distribution
 - `ghost_exchange::GE` — [`GhostExchange`](@ref) for halo communication, or `Nothing`
 """
-struct MultiDeviceVector{T,VP<:AbstractVector{<:CuVector{T}},P<:PartitionSpec,GE} <:
-       AbstractVector{T}
+struct MultiDeviceVector{T, VP <: AbstractVector{<:CuVector{T}}, P <: PartitionSpec, GE} <:
+    AbstractVector{T}
     partitions::VP
     spec::P
     ghost_exchange::GE
@@ -27,7 +27,7 @@ function MultiDeviceVector{T}(::UndefInitializer, spec::PartitionSpec, ghost_exc
             partitions[d] = CuVector{T}(undef, length(spec.ranges[d]))
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost_exchange)}(
+    return MultiDeviceVector{T, Vector{CuVector{T}}, typeof(spec), typeof(ghost_exchange)}(
         partitions, spec, ghost_exchange
     )
 end
@@ -45,7 +45,7 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec, ghost_exchange) wh
             partitions[d] = CuVector{T}(v[spec.ranges[d]])
         end
     end
-    return MultiDeviceVector{T,Vector{CuVector{T}},typeof(spec),typeof(ghost_exchange)}(
+    return MultiDeviceVector{T, Vector{CuVector{T}}, typeof(spec), typeof(ghost_exchange)}(
         partitions, spec, ghost_exchange
     )
 end
@@ -54,7 +54,7 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
     return MultiDeviceVector(v, spec, nothing)
 end
 
-function MultiDeviceVector(v::Vector{T}; ndevices::Int=length(CUDA.devices())) where {T}
+function MultiDeviceVector(v::Vector{T}; ndevices::Int = length(CUDA.devices())) where {T}
     spec = compute_partition_ranges(length(v), ndevices)
     return MultiDeviceVector(v, spec)
 end
@@ -67,17 +67,17 @@ function Base.similar(v::MultiDeviceVector{T}) where {T}
     return MultiDeviceVector{T}(undef, v.spec, copy_exchange(v.ghost_exchange, v.spec))
 end
 
-function Base.similar(v::MultiDeviceVector{T}, ::Type{S}) where {T,S}
+function Base.similar(v::MultiDeviceVector{T}, ::Type{S}) where {T, S}
     ghost = S === T ? copy_exchange(v.ghost_exchange, v.spec) : nothing
     return MultiDeviceVector{S}(undef, v.spec, ghost)
 end
 
-function Base.similar(v::MultiDeviceVector{T}, ::Type{S}, dims::Tuple{Int}) where {T,S}
+function Base.similar(v::MultiDeviceVector{T}, ::Type{S}, dims::Tuple{Int}) where {T, S}
     if dims == size(v)
         ghost = S === T ? copy_exchange(v.ghost_exchange, v.spec) : nothing
         return MultiDeviceVector{S}(undef, v.spec, ghost)
     end
-    spec = compute_partition_ranges(dims[1], v.spec.ndevices; devices=collect(Int, v.spec.devices))
+    spec = compute_partition_ranges(dims[1], v.spec.ndevices; devices = collect(Int, v.spec.devices))
     return MultiDeviceVector{S}(undef, spec, nothing)
 end
 

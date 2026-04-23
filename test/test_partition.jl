@@ -125,7 +125,7 @@ end
     end
 
     @testset "Custom devices via compute_partition_ranges" begin
-        spec = compute_partition_ranges(100, 3; devices=[3, 4, 5])
+        spec = compute_partition_ranges(100, 3; devices = [3, 4, 5])
         @test spec.devices == [3, 4, 5]
         @test spec.devices isa Vector{Int}
         @test device_id(spec, 1) == 3
@@ -134,31 +134,31 @@ end
     end
 
     @testset "Custom devices via manual PartitionSpec" begin
-        spec = PartitionSpec([1:50, 51:100]; devices=[2, 7])
+        spec = PartitionSpec([1:50, 51:100]; devices = [2, 7])
         @test spec.devices == [2, 7]
         @test device_id(spec, 1) == 2
         @test device_id(spec, 2) == 7
     end
 
     @testset "Infer ndevices from devices" begin
-        spec = compute_partition_ranges(100; devices=[1, 3, 5])
+        spec = compute_partition_ranges(100; devices = [1, 3, 5])
         @test spec.ndevices == 3
         @test spec.devices == [1, 3, 5]
         @test spec.len == 100
     end
 
     @testset "Validation: wrong length" begin
-        @test_throws ArgumentError compute_partition_ranges(100, 3; devices=[0, 1])
-        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices=[0, 1, 2])
+        @test_throws ArgumentError compute_partition_ranges(100, 3; devices = [0, 1])
+        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices = [0, 1, 2])
     end
 
     @testset "Validation: negative device IDs" begin
-        @test_throws ArgumentError compute_partition_ranges(100, 2; devices=[-1, 0])
-        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices=[0, -1])
+        @test_throws ArgumentError compute_partition_ranges(100, 2; devices = [-1, 0])
+        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices = [0, -1])
     end
 
     @testset "Validation: duplicate device IDs" begin
-        @test_throws ArgumentError compute_partition_ranges(100, 3; devices=[0, 1, 1])
-        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices=[3, 3])
+        @test_throws ArgumentError compute_partition_ranges(100, 3; devices = [0, 1, 1])
+        @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices = [3, 3])
     end
 end
