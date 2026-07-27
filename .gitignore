@@ -4,3 +4,9 @@
 /Manifest*.toml
 /docs/Manifest*.toml
 /docs/build/
+.DS_Store
+
+# Vendored CUDA/NCCL tooling checkouts for GPU comms validation (~875 MB, built on the
+# GPU host where they are run). The reports they produced are tracked in
+# docs/gpu-p2p-validation/.
+/gpu-comms-validation/

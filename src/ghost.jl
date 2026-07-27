@@ -137,11 +137,62 @@ function _remap_colval(
     return remapped
 end
 
+const _P2P_PROBE_LENGTH = 256
+
+const _p2p_probe_lock = ReentrantLock()
+const _p2p_probe_cache = Dict{Tuple{Int, Int}, Bool}()
+
+"""
+    _p2p_copy_ok(src_dev::Int, dst_dev::Int) -> Bool
+
+Return whether direct device-to-device `copyto!` from CUDA device `src_dev` to `dst_dev`
+(0-indexed IDs) delivers correct data, using a cached one-time data round-trip probe.
+`CUDA.can_access_peer` cannot be trusted here: on hosts with broken P2P (IOMMU/ACS
+misconfiguration is the usual culprit) peer copies report success but silently write
+zeros, so only an actual data comparison is conclusive. Warns once per failing ordered
+device pair.
+"""
+function _p2p_copy_ok(src_dev::Int, dst_dev::Int)
+    src_dev == dst_dev && return true
+    return Base.@lock _p2p_probe_lock begin
+        get!(_p2p_probe_cache, (src_dev, dst_dev)) do
+            ok = _probe_p2p_copy(src_dev, dst_dev)
+            ok || @warn(
+                "Direct GPU-to-GPU copies from CUDA device $src_dev to device " *
+                    "$dst_dev silently corrupt data (construction-time probe failed); " *
+                    "falling back to host-staged ghost transfers for this device pair. " *
+                    "This usually means P2P is broken at the system level (IOMMU/ACS " *
+                    "misconfiguration) even though CUDA reports peer access as available."
+            )
+            ok
+        end
+    end
+end
+
+function _probe_p2p_copy(src_dev::Int, dst_dev::Int)
+    pattern = Float32.(1:_P2P_PROBE_LENGTH)
+    prev = CUDA.device()
+    try
+        CUDA.device!(src_dev)
+        src = CuVector{Float32}(pattern)
+        CUDA.synchronize()
+        CUDA.device!(dst_dev)
+        dst = CUDA.zeros(Float32, _P2P_PROBE_LENGTH)
+        copyto!(dst, src)
+        return Array(dst) == pattern
+    finally
+        CUDA.device!(prev)
+    end
+end
+
 """
     GhostExchange{Tv,V,VI}
 
 Pre-computed ghost/halo communication topology and GPU buffers for peer-to-peer exchange
 between devices. Used by [`scatter!`](@ref) (owner→ghost) and [`reduce!`](@ref) (ghost→owner).
+Construction probes each communicating device pair with a small data round-trip and
+transparently degrades to host-staged transfers (with a one-time warning) on pairs where
+direct P2P copies silently corrupt data.
 
 # Fields
 - `ghost_global_indices` — global indices needed as ghosts on each device
@@ -153,6 +204,8 @@ between devices. Used by [`scatter!`](@ref) (owner→ghost) and [`reduce!`](@ref
 - `recv_buffers` — pre-allocated GPU receive buffers per neighbor per device
 - `send_indices_gpu` — GPU-side copies of send index arrays for gather operations
 - `local_x` — per-device extended vectors (`[owned | ghost]`) used during communication
+- `p2p_ok` — per neighbor slot, whether direct D2D copies from that neighbor's device were verified correct by a construction-time data probe
+- `host_buffers` — pre-allocated host staging buffers used when the probe failed (broken P2P silently corrupts direct copies)
 """
 struct GhostExchange{Tv, V <: AbstractVector{Tv}, VI <: AbstractVector{Int}}
     ghost_global_indices::Vector{Vector{Int}}
@@ -164,6 +217,8 @@ struct GhostExchange{Tv, V <: AbstractVector{Tv}, VI <: AbstractVector{Int}}
     recv_buffers::Vector{Vector{V}}
     send_indices_gpu::Vector{Vector{VI}}
     local_x::Vector{V}
+    p2p_ok::Vector{Vector{Bool}}
+    host_buffers::Vector{Vector{Vector{Tv}}}
 end
 
 function GhostExchange(
@@ -177,10 +232,19 @@ function GhostExchange(
     ) where {Tv}
     ndevices = row_spec.ndevices
 
+    p2p_ok = Vector{Vector{Bool}}(undef, ndevices)
+    for d in 1:ndevices
+        p2p_ok[d] = [
+            _p2p_copy_ok(device_id(row_spec, nbr), device_id(row_spec, d))
+                for nbr in neighbors[d]
+        ]
+    end
+
     send_buffers = Vector{Vector{CuVector{Tv}}}(undef, ndevices)
     recv_buffers = Vector{Vector{CuVector{Tv}}}(undef, ndevices)
     send_indices_gpu = Vector{Vector{CuVector{Int}}}(undef, ndevices)
     local_x = Vector{CuVector{Tv}}(undef, ndevices)
+    host_buffers = Vector{Vector{Vector{Tv}}}(undef, ndevices)
 
     @sync for d in 1:ndevices
         @async begin
@@ -201,12 +265,23 @@ function GhostExchange(
                 CuVector{Int}(send_local_indices[d][k])
                     for k in eachindex(neighbors[d])
             ]
+            host_buffers[d] = Vector{Tv}[
+                Vector{Tv}(
+                        undef,
+                        max(
+                            length(send_local_indices[d][k]),
+                            length(recv_ghost_offsets[d][k]),
+                        ),
+                    )
+                    for k in eachindex(neighbors[d])
+            ]
         end
     end
 
     return GhostExchange{Tv, CuVector{Tv}, CuVector{Int}}(
         ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
         neighbor_reverse, send_buffers, recv_buffers, send_indices_gpu, local_x,
+        p2p_ok, host_buffers,
     )
 end
 
@@ -271,6 +346,12 @@ function copy_exchange(ghost::GhostExchange{Tv, V, VI}, spec::PartitionSpec) whe
         end
     end
 
+    p2p_ok = [copy(flags) for flags in ghost.p2p_ok]
+    host_buffers = [
+        Vector{Tv}[Vector{Tv}(undef, length(b)) for b in ghost.host_buffers[d]]
+            for d in 1:ndevices
+    ]
+
     return GhostExchange{Tv, V, VI}(
         ghost.ghost_global_indices,
         ghost.neighbors,
@@ -281,6 +362,8 @@ function copy_exchange(ghost::GhostExchange{Tv, V, VI}, spec::PartitionSpec) whe
         recv_buffers,
         ghost.send_indices_gpu,
         local_x,
+        p2p_ok,
+        host_buffers,
     )
 end
 
@@ -330,10 +413,35 @@ function scatter!(::MultiDeviceVector{Tv, VP, P, Nothing}) where {Tv, VP, P}
 end
 
 """
+    _transfer_slab!(dest, src, host_buf, p2p_ok)
+
+Copy `length(dest)` elements from `src` (neighbor device) into `dest` (current device),
+directly when `p2p_ok`, otherwise staged through `host_buf` because direct P2P copies on
+this device pair silently corrupt data. The D→H copy synchronizes against the stream that
+produced `src`, and the H→D enqueue from pageable memory captures `host_buf` before
+returning, so `host_buf` is safely reusable by the next exchange — do not pin it.
+"""
+function _transfer_slab!(
+        dest::AbstractVector{Tv}, src::AbstractVector{Tv}, host_buf::Vector{Tv},
+        p2p_ok::Bool,
+    ) where {Tv}
+    if p2p_ok
+        copyto!(dest, src)
+    else
+        n = length(dest)
+        copyto!(host_buf, 1, src, 1, n)
+        copyto!(dest, 1, host_buf, 1, n)
+    end
+    return dest
+end
+
+"""
     scatter!(x, ghost, spec)
 
 Owner→ghost exchange: pack owned data into send buffers, transfer between devices,
-and assemble `local_x = [owned | ghost]` on each device.
+and assemble `local_x = [owned | ghost]` on each device. Device pairs whose
+construction-time P2P probe failed are transferred via pre-allocated host staging
+buffers instead of direct D2D copies.
 """
 function scatter!(
         x::MultiDeviceVector{Tv},
@@ -368,7 +476,10 @@ function scatter!(
                 offsets = ghost.recv_ghost_offsets[d][k]
                 if !isempty(offsets)
                     k_in_nbr = ghost.neighbor_reverse[d][k]
-                    copyto!(ghost.recv_buffers[d][k], ghost.send_buffers[nbr][k_in_nbr])
+                    _transfer_slab!(
+                        ghost.recv_buffers[d][k], ghost.send_buffers[nbr][k_in_nbr],
+                        ghost.host_buffers[d][k], ghost.p2p_ok[d][k],
+                    )
                     copyto!(
                         view(ghost.local_x[d], n_owned .+ offsets), ghost.recv_buffers[d][k]
                     )
@@ -403,7 +514,9 @@ end
 
 Ghost→owner reduction: for each device, copies owned values from `ghost.local_x` into
 `x.partitions`, packs ghost contributions into buffers, transfers them to owner devices,
-and applies `op` element-wise into the owner's partition of `x`.
+and applies `op` element-wise into the owner's partition of `x`. Device pairs whose
+construction-time P2P probe failed are transferred via pre-allocated host staging buffers
+instead of direct D2D copies.
 
 The caller is responsible for populating `ghost.local_x[d]` (the `[owned | ghost]` extended
 vector) before calling `reduce!`.
@@ -444,7 +557,10 @@ function reduce!(
             for (k, nbr) in enumerate(ghost.neighbors[d])
                 if !isempty(ghost.send_local_indices[d][k])
                     k_in_nbr = ghost.neighbor_reverse[d][k]
-                    copyto!(ghost.send_buffers[d][k], ghost.recv_buffers[nbr][k_in_nbr])
+                    _transfer_slab!(
+                        ghost.send_buffers[d][k], ghost.recv_buffers[nbr][k_in_nbr],
+                        ghost.host_buffers[d][k], ghost.p2p_ok[d][k],
+                    )
                     x.partitions[d][ghost.send_indices_gpu[d][k]] .= op.(
                         x.partitions[d][ghost.send_indices_gpu[d][k]],
                         ghost.send_buffers[d][k],

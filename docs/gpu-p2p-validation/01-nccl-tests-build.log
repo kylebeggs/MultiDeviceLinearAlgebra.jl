@@ -1,0 +1,90 @@
+make: Entering directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests'
+make -C src build BUILDDIR=/home/kbeggs/dev/gpu-comms-validation/nccl-tests/build
+make[1]: Entering directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests/src'
+make[2]: Entering directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests/os'
+Compiling  timer.cc                            > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/timer.o
+Compiling /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/verifiable/verifiable.o
+Compiling  all_reduce.cu                       > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_reduce.o
+Compiling  common.cu                           > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/common.o
+Compiling  util.cu                             > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/util.o
+Compiling  all_gather.cu                       > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_gather.o
+Compiling  broadcast.cu                        > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/broadcast.o
+Compiling  linux.cc                            > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/os/linux.o
+Compiling  reduce_scatter.cu                   > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce_scatter.o
+Creating archive /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/os/linux.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/os/libnccl_test_os.a
+make[2]: Leaving directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests/os'
+Compiling  reduce.cu                           > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce.o
+Compiling  alltoall.cu                         > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoall.o
+Compiling  alltoallv.cu                        > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoallv.o
+Compiling  scatter.cu                          > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/scatter.o
+Compiling  gather.cu                           > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/gather.o
+Compiling  sendrecv.cu                         > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/sendrecv.o
+Compiling  hypercube.cu                        > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/hypercube.o
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_reduce.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_reduce_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_gather.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/all_gather_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/broadcast.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/broadcast_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce_scatter.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce_scatter_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/reduce_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoall.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoall_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoallv.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/alltoallv_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/scatter.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/scatter_perf
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/gather.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/gather_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/sendrecv.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/sendrecv_perf
+Linking  /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/hypercube.o > /home/kbeggs/dev/gpu-comms-validation/nccl-tests/build/hypercube_perf
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_60)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_61)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_70)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_80)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+nvlink warning : Skipping incompatible '/usr/lib/x86_64-linux-gnu/librt.a' when searching for -lrt (target: sm_90)
+make[1]: Leaving directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests/src'
+make: Leaving directory '/home/kbeggs/dev/gpu-comms-validation/nccl-tests'

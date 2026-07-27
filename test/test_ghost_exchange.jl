@@ -323,3 +323,200 @@ end
         @test_throws ArgumentError reduce!(x, +)
     end
 end
+
+@testset "Host-staged fallback" begin
+    @testset "probe cache and construction flags" begin
+        # Same-device copies never need P2P
+        @test MultiDeviceLinearAlgebra._p2p_copy_ok(0, 0)
+
+        if NGPUS >= 2
+            spec = compute_partition_ranges(20, 2)
+            src_dev = device_id(spec, 2)
+            dst_dev = device_id(spec, 1)
+
+            # Deterministic and cached: repeated calls agree. Do NOT assert `true` —
+            # on hosts with broken P2P the correct answer is `false`.
+            r1 = MultiDeviceLinearAlgebra._p2p_copy_ok(src_dev, dst_dev)
+            r2 = MultiDeviceLinearAlgebra._p2p_copy_ok(src_dev, dst_dev)
+            @test r1 isa Bool
+            @test r1 == r2
+
+            ghost = GhostExchange(_neighbor_ghost_indices(spec), spec, Float64)
+            for d in 1:2, (k, nbr) in enumerate(ghost.neighbors[d])
+                @test ghost.p2p_ok[d][k] == MultiDeviceLinearAlgebra._p2p_copy_ok(
+                    device_id(spec, nbr), device_id(spec, d)
+                )
+                @test length(ghost.host_buffers[d][k]) == max(
+                    length(ghost.send_local_indices[d][k]),
+                    length(ghost.recv_ghost_offsets[d][k]),
+                )
+            end
+        end
+    end
+
+    @testset "forced host path: scatter!" begin
+        for ndev in 1:min(NGPUS, 4)
+            ndev < 2 && continue
+            @testset "$ndev devices" begin
+                n = 10 * ndev
+                spec = compute_partition_ranges(n, ndev)
+                ggi = _neighbor_ghost_indices(spec)
+
+                ghost = GhostExchange(ggi, spec, Float64)
+                for d in 1:ndev
+                    fill!(ghost.p2p_ok[d], false)
+                end
+
+                x = MultiDeviceVector(collect(1.0:n), spec)
+                scatter!(x, ghost, spec)
+
+                for d in 1:ndev
+                    local_x_host = Array(ghost.local_x[d])
+                    n_owned = length(spec.ranges[d])
+
+                    @test local_x_host[1:n_owned] ≈ collect(Float64.(spec.ranges[d]))
+                    for (i, g) in enumerate(ggi[d])
+                        @test local_x_host[n_owned + i] ≈ Float64(g)
+                    end
+                end
+            end
+        end
+    end
+
+    @testset "forced host path: reduce! with +" begin
+        for ndev in 1:min(NGPUS, 4)
+            ndev < 2 && continue
+            @testset "$ndev devices" begin
+                n = 10 * ndev
+                spec = compute_partition_ranges(n, ndev)
+                ggi = _neighbor_ghost_indices(spec)
+
+                ghost = GhostExchange(ggi, spec, Float64)
+                for d in 1:ndev
+                    fill!(ghost.p2p_ok[d], false)
+                end
+
+                # Fill local_x: owned = 1.0, ghost = 10.0
+                for d in 1:ndev
+                    CUDA.device!(device_id(spec, d))
+                    n_owned = length(spec.ranges[d])
+                    n_ghost = length(ggi[d])
+                    ghost.local_x[d] .= vcat(
+                        CUDA.ones(Float64, n_owned),
+                        CUDA.fill(10.0, n_ghost),
+                    )
+                end
+
+                x = MultiDeviceVector{Float64}(undef, spec)
+                for d in 1:ndev
+                    CUDA.device!(device_id(spec, d))
+                    x.partitions[d] .= 0.0
+                end
+
+                reduce!(x, ghost, spec, +)
+
+                x_host = Array(gather(x))
+
+                for i in 1:n
+                    owner, _ = device_for_index(spec, i)
+                    n_contributors = count(
+                        d -> d != owner && i in ggi[d], 1:ndev
+                    )
+                    @test x_host[i] ≈ 1.0 + 10.0 * n_contributors
+                end
+            end
+        end
+    end
+
+    @testset "forced host path: asymmetric ghost counts" begin
+        ndev = min(NGPUS, 2)
+        ndev < 2 && return
+
+        n = 20
+        spec = compute_partition_ranges(n, 2)
+
+        # Unequal send/recv slab sizes exercise the max-sized shared host buffer
+        # through both 5-arg copyto! directions
+        ggi = [
+            [first(spec.ranges[2]), first(spec.ranges[2]) + 1, first(spec.ranges[2]) + 2],
+            [last(spec.ranges[1])],
+        ]
+        ghost = GhostExchange(ggi, spec, Float64)
+        for d in 1:2
+            fill!(ghost.p2p_ok[d], false)
+        end
+
+        x = MultiDeviceVector(collect(1.0:n), spec)
+        scatter!(x, ghost, spec)
+
+        for d in 1:2
+            local_x_host = Array(ghost.local_x[d])
+            n_owned = length(spec.ranges[d])
+            for (i, g) in enumerate(ggi[d])
+                @test local_x_host[n_owned + i] ≈ Float64(g)
+            end
+        end
+
+        for d in 1:2
+            CUDA.device!(device_id(spec, d))
+            n_owned = length(spec.ranges[d])
+            n_ghost = length(ggi[d])
+            ghost.local_x[d] .= vcat(
+                CUDA.ones(Float64, n_owned),
+                CUDA.fill(5.0, n_ghost),
+            )
+        end
+
+        x_result = MultiDeviceVector{Float64}(undef, spec)
+        for d in 1:2
+            CUDA.device!(device_id(spec, d))
+            x_result.partitions[d] .= 0.0
+        end
+
+        reduce!(x_result, ghost, spec, +)
+        result_host = Array(gather(x_result))
+
+        boundary_idx = last(spec.ranges[1])
+        @test result_host[boundary_idx] ≈ 1.0 + 5.0
+
+        for g in ggi[1]
+            @test result_host[g] ≈ 1.0 + 5.0
+        end
+    end
+
+    @testset "copy_exchange carries fallback state" begin
+        ndev = min(NGPUS, 2)
+        ndev < 2 && return
+
+        n = 20
+        spec = compute_partition_ranges(n, 2)
+        ggi = _neighbor_ghost_indices(spec)
+
+        ghost = GhostExchange(ggi, spec, Float64)
+        for d in 1:2
+            fill!(ghost.p2p_ok[d], false)
+        end
+
+        derived = MultiDeviceLinearAlgebra.copy_exchange(ghost, spec)
+
+        @test derived.p2p_ok == ghost.p2p_ok
+        for d in 1:2
+            @test derived.p2p_ok[d] !== ghost.p2p_ok[d]
+            @test length.(derived.host_buffers[d]) == length.(ghost.host_buffers[d])
+            for k in eachindex(ghost.host_buffers[d])
+                @test derived.host_buffers[d][k] !== ghost.host_buffers[d][k]
+            end
+        end
+
+        x = MultiDeviceVector(collect(1.0:n), spec)
+        scatter!(x, derived, spec)
+
+        for d in 1:2
+            local_x_host = Array(derived.local_x[d])
+            n_owned = length(spec.ranges[d])
+            for (i, g) in enumerate(ggi[d])
+                @test local_x_host[n_owned + i] ≈ Float64(g)
+            end
+        end
+    end
+end
