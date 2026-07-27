@@ -13,6 +13,23 @@ Distribute dense vectors and sparse CSR matrices across multiple NVIDIA GPUs thr
 - [CUDA.jl](https://github.com/JuliaGPU/CUDA.jl) v5
 - 1 or more NVIDIA GPUs (multi-GPU features require 2+)
 
+### Host requirements for multi-GPU
+
+Ghost exchange moves data between devices with PCIe peer-to-peer copies, so the **host** must be
+configured to allow them:
+
+- **VT-d / IOMMU must be off or in passthrough mode.** Boot with `intel_iommu=off` or `iommu=pt`
+  (`amd_iommu=off` / `iommu=pt` on AMD). With the IOMMU in translating mode, peer transfers can
+  silently return zeros or `nan` at a fraction of the expected bandwidth.
+- **`CUDA.can_access_peer` is not a reliable health check.** On a misconfigured host it returns
+  `true` for every pair while the transfers themselves corrupt data. Trust an actual data
+  round-trip, not the capability query.
+
+MultiDeviceLinearAlgebra probes each ordered device pair at `GhostExchange` construction with a
+cached round-trip check. Pairs that fail fall back to host-staged transfers and emit a one-time
+warning — correct results, reduced bandwidth. **If you see that warning, fix the host**; the
+fallback is a safety net, not a supported operating mode.
+
 ## Installation
 
 ```julia
