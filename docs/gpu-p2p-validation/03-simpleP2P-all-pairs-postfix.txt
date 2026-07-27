@@ -1,0 +1,108 @@
+=== pair 0,1 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.46GB/s
+Test passed
+=== pair 0,2 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.27GB/s
+Test passed
+=== pair 0,3 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.63GB/s
+Test passed
+=== pair 0,4 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 14.39GB/s
+Test passed
+=== pair 0,5 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 15.85GB/s
+Test passed
+=== pair 0,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.41GB/s
+Test passed
+=== pair 0,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.16GB/s
+Test passed
+=== pair 0,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.35GB/s
+Test passed
+=== pair 1,2 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.40GB/s
+Test passed
+=== pair 1,3 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.12GB/s
+Test passed
+=== pair 1,4 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.30GB/s
+Test passed
+=== pair 1,5 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.17GB/s
+Test passed
+=== pair 1,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.85GB/s
+Test passed
+=== pair 1,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.15GB/s
+Test passed
+=== pair 1,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.23GB/s
+Test passed
+=== pair 2,3 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.11GB/s
+Test passed
+=== pair 2,4 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.19GB/s
+Test passed
+=== pair 2,5 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.34GB/s
+Test passed
+=== pair 2,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.68GB/s
+Test passed
+=== pair 2,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 15.90GB/s
+Test passed
+=== pair 2,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.96GB/s
+Test passed
+=== pair 3,4 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 15.98GB/s
+Test passed
+=== pair 3,5 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.97GB/s
+Test passed
+=== pair 3,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.31GB/s
+Test passed
+=== pair 3,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.85GB/s
+Test passed
+=== pair 3,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.41GB/s
+Test passed
+=== pair 4,5 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.58GB/s
+Test passed
+=== pair 4,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.12GB/s
+Test passed
+=== pair 4,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 17.84GB/s
+Test passed
+=== pair 4,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.85GB/s
+Test passed
+=== pair 5,6 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.20GB/s
+Test passed
+=== pair 5,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.52GB/s
+Test passed
+=== pair 5,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.59GB/s
+Test passed
+=== pair 6,7 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.29GB/s
+Test passed
+=== pair 6,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.97GB/s
+Test passed
+=== pair 7,8 ===
+cudaMemcpyPeer / cudaMemcpy between GPU0 and GPU1: 16.39GB/s
+Test passed
