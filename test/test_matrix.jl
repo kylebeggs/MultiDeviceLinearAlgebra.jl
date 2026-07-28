@@ -1,5 +1,24 @@
 @testset "MultiDeviceSparseMatrixCSR" begin
-    @testset "ndev=$ndev" for ndev in 1:min(NGPUS, 4)
+    @testset "Default ndevices uses every visible GPU" begin
+        # The production default (`ndevices = length(CUDA.devices())`) is the
+        # configuration users actually get, so exercise it without the kwarg.
+        n = 200
+        A_cpu = sprand(Float64, n, n, 0.05) + 10.0 * sparse(I, n, n)
+        x_cpu = randn(n)
+        y_expected = A_cpu * x_cpu
+
+        A_md = MultiDeviceSparseMatrixCSR(A_cpu)
+        @test A_md.row_spec.ndevices == NGPUS
+        @test collect(A_md.row_spec.devices) == collect(0:(NGPUS - 1))
+        @test gather(A_md) ≈ A_cpu
+
+        x_md = MultiDeviceVector(x_cpu)
+        y_md = MultiDeviceVector(zeros(n))
+        mul!(y_md, A_md, x_md)
+        @test gather(y_md) ≈ y_expected rtol = 1.0e-10
+    end
+
+    @testset "ndev=$ndev" for ndev in DEVICE_COUNTS
         @testset "Construction and size" begin
             n = 50
             A_cpu = sprand(Float64, n, n, 0.1) + 5.0 * sparse(I, n, n)

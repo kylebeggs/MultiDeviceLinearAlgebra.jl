@@ -1,5 +1,5 @@
 @testset "Krylov.jl CG integration" begin
-    @testset "ndev=$ndev" for ndev in 1:min(NGPUS, 4)
+    @testset "ndev=$ndev" for ndev in DEVICE_COUNTS
         @testset "CG solve small SPD system" begin
             n = 200
             A_cpu = sprand(Float64, n, n, 0.05)
@@ -43,7 +43,7 @@ end
 @testset "LinearSolve.jl integration" begin
     using LinearSolve
 
-    @testset "ndev=$ndev" for ndev in 1:min(NGPUS, 4)
+    @testset "ndev=$ndev" for ndev in DEVICE_COUNTS
         n = 100
         A_cpu = sprand(Float64, n, n, 0.1)
         A_cpu = A_cpu + A_cpu' + 15.0 * sparse(I, n, n)
@@ -69,7 +69,7 @@ end
     b_cpu = A_cpu * x_true
 
     iter_counts = Int[]
-    for ndev in 1:min(NGPUS, 4)
+    for ndev in DEVICE_COUNTS
         A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
         b_md = MultiDeviceVector(b_cpu; ndevices = ndev)
 

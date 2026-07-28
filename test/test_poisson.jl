@@ -43,7 +43,7 @@ end
 
 if HAS_CUDA && NGPUS >= 1
     @testset "Poisson GPU solve" begin
-        @testset "ndev=$ndev" for ndev in 1:min(NGPUS, 4)
+        @testset "ndev=$ndev" for ndev in DEVICE_COUNTS
             nx = ny = 30
             hx = 1.0 / (nx + 1)
             hy = 1.0 / (ny + 1)

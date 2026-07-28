@@ -1,6 +1,6 @@
 @testset "MultiDeviceVector broadcasting" begin
     n = 100
-    ndev = min(NGPUS, 4)
+    ndev = NGPUS
 
     @testset "y .= α .* x" begin
         α = 2.5
