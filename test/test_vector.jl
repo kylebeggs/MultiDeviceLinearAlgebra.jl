@@ -195,7 +195,7 @@
         @test gather(v_with) ≈ gather(v_md)
     end
 
-    @testset "similar does not propagate ghost_exchange" begin
+    @testset "similar carries an independent ghost_exchange" begin
         ndev >= 2 || return
         spec = compute_partition_ranges(n, ndev)
         ggi = _neighbor_ghost_indices(spec)
@@ -204,7 +204,15 @@
         v_md = MultiDeviceVector(randn(n), spec, ghost)
         @test v_md.ghost_exchange === ghost
 
+        # `similar` hands back a `copy_exchange` of the source's exchange: same topology,
+        # but its own buffers, so writing through one result cannot disturb the other.
         w = similar(v_md)
-        @test w.ghost_exchange === nothing
+        @test w.ghost_exchange !== nothing
+        @test w.ghost_exchange !== ghost
+        @test w.ghost_exchange.ghost_global_indices == ghost.ghost_global_indices
+        @test w.ghost_exchange.neighbors == ghost.neighbors
+        for d in 1:ndev
+            @test w.ghost_exchange.local_x[d] !== ghost.local_x[d]
+        end
     end
 end
