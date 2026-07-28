@@ -19,7 +19,9 @@ struct MultiDeviceSparseMatrixCSR{Tv, Ti, GE, VP <: AbstractVector{<:CuSparseMat
 end
 
 function MultiDeviceSparseMatrixCSR(
-        A::SparseMatrixCSC{Tv, Ti}; ndevices::Int = length(CUDA.devices())
+        # `Int(...)` is load-bearing: `length(CUDA.devices())` is an `Int32` and a typed
+        # keyword default is not converted, so without it the no-kwarg call MethodErrors.
+        A::SparseMatrixCSC{Tv, Ti}; ndevices::Int = Int(length(CUDA.devices()))
     ) where {Tv, Ti}
     nrows = size(A, 1)
     @assert ndevices <= nrows "More devices ($ndevices) than rows ($nrows)"

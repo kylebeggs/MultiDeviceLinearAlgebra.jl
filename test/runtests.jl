@@ -6,7 +6,11 @@ using Krylov
 using CUDA
 
 const HAS_CUDA = CUDA.functional()
-const NGPUS = HAS_CUDA ? length(CUDA.devices()) : 0
+# `length(CUDA.devices())` returns an `Int32`. The old `min(NGPUS, 4)` call sites
+# promoted that to `Int` incidentally; now that device counts are used raw, convert
+# once here so `NGPUS` is an `Int` on both branches and matches
+# `compute_partition_ranges(::Int, ::Int)`.
+const NGPUS = HAS_CUDA ? Int(length(CUDA.devices())) : 0
 
 """
 Device counts swept by the GPU testsets: the small regression points plus the
