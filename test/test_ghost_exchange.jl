@@ -318,6 +318,38 @@ end
         end
     end
 
+    # Regression guard for #24. `buf .= x[idx]` and `x[idx] .= op.(x[idx], buf)` each
+    # materialize a device temporary per neighbor per call, because
+    # `getindex(::CuVector, ::CuVector)` is evaluated eagerly rather than fused into the
+    # broadcast. `_gather!` / `_scatter_apply!` replaced both with single launches, so the
+    # steady-state device allocation of an exchange is now exactly zero.
+    #
+    # `CUDA.@allocated` reads `CUDA.alloc_stats`, a process-global counter bumped on every
+    # `pool_alloc` — cache hits included, and from any device or task. That is what makes it
+    # usable across the `@sync`/`@async` device loop, and also why nothing else may be
+    # running on a GPU concurrently with this testset.
+    @testset "scatter!/reduce! allocate no device temporaries" begin
+        for ndev in DEVICE_COUNTS
+            ndev < 2 && continue
+            @testset "$ndev devices" begin
+                n = 10 * ndev
+                spec = compute_partition_ranges(n, ndev)
+                ggi = _neighbor_ghost_indices(spec)
+                ghost = GhostExchange(ggi, spec, Float64)
+
+                x = attach_ghost(MultiDeviceVector(collect(1.0:n), spec), ghost)
+
+                # First call JITs both kernels and populates the pool; only the steady
+                # state is being asserted on.
+                scatter!(x)
+                reduce!(x, +)
+
+                @test CUDA.@allocated(scatter!(x)) == 0
+                @test CUDA.@allocated(reduce!(x, +)) == 0
+            end
+        end
+    end
+
     @testset "scatter!/reduce! without exchange throws" begin
         # Not about device count — any legal partition of 20 elements will do.
         spec = compute_partition_ranges(20, min(NGPUS, 20))

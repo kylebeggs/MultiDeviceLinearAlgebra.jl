@@ -394,6 +394,62 @@ function attach_ghost(
     return attach_ghost(v, ghost)
 end
 
+# Fused indexed gather / scatter-apply.
+#
+# `buf .= x[idx]` and `x[idx] .= op.(x[idx], buf)` look fused but are not:
+# `getindex(::CuVector, ::CuVector)` is evaluated eagerly, so each occurrence materializes a
+# device temporary before the broadcast ever runs — one for the gather, two for the
+# read-modify-write. These kernels do the same work in a single launch with none.
+
+function _gather_kernel!(buf, x, idx)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(idx)
+        @inbounds buf[i] = x[idx[i]]
+    end
+    return nothing
+end
+
+function _scatter_apply_kernel!(x, idx, buf, op::F) where {F}
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(idx)
+        @inbounds j = idx[i]
+        @inbounds x[j] = op(x[j], buf[i])
+    end
+    return nothing
+end
+
+"""
+    _gather!(buf, x, idx)
+
+`buf[i] = x[idx[i]]` for every `i`, in one kernel launch and with no device temporary.
+"""
+function _gather!(buf::CuVector{Tv}, x::CuVector{Tv}, idx::CuVector{<:Integer}) where {Tv}
+    n = length(idx)
+    n == 0 && return buf
+    kernel = @cuda launch = false _gather_kernel!(buf, x, idx)
+    threads = min(n, launch_configuration(kernel.fun).threads)
+    kernel(buf, x, idx; threads, blocks = cld(n, threads))
+    return buf
+end
+
+"""
+    _scatter_apply!(x, idx, buf, op)
+
+`x[idx[i]] = op(x[idx[i]], buf[i])` for every `i`, in one kernel launch and with no device
+temporary. `idx` must be free of duplicates — it is, since send index lists are built from a
+`Set` (see [`_compute_ghost_map`](@ref)) — otherwise concurrent threads race on one slot.
+"""
+function _scatter_apply!(
+        x::CuVector{Tv}, idx::CuVector{<:Integer}, buf::CuVector{Tv}, op::F
+    ) where {Tv, F}
+    n = length(idx)
+    n == 0 && return x
+    kernel = @cuda launch = false _scatter_apply_kernel!(x, idx, buf, op)
+    threads = min(n, launch_configuration(kernel.fun).threads)
+    kernel(x, idx, buf, op; threads, blocks = cld(n, threads))
+    return x
+end
+
 """
     scatter!(x::MultiDeviceVector)
 
@@ -455,9 +511,9 @@ function scatter!(
         @async begin
             CUDA.device!(device_id(row_spec, d))
             for k in eachindex(ghost.neighbors[d])
-                if !isempty(ghost.send_local_indices[d][k])
-                    ghost.send_buffers[d][k] .= x.partitions[d][ghost.send_indices_gpu[d][k]]
-                end
+                _gather!(
+                    ghost.send_buffers[d][k], x.partitions[d], ghost.send_indices_gpu[d][k]
+                )
             end
         end
     end
@@ -494,6 +550,9 @@ end
 
 Ghost→owner reduction using the vector's own [`GhostExchange`](@ref). The vector must have
 been constructed with a ghost exchange (see [`attach_ghost`](@ref)).
+
+`op` runs inside a GPU kernel, so it must be a device-compatible `isbits` function — `+`,
+`max`, and other singleton callables qualify; a closure capturing host data does not.
 """
 function reduce!(
         x::MultiDeviceVector{Tv, VP, P, GE}, op::F
@@ -520,6 +579,9 @@ instead of direct D2D copies.
 
 The caller is responsible for populating `ghost.local_x[d]` (the `[owned | ghost]` extended
 vector) before calling `reduce!`.
+
+`op` runs inside a GPU kernel, so it must be a device-compatible `isbits` function — `+`,
+`max`, and other singleton callables qualify; a closure capturing host data does not.
 """
 function reduce!(
         x::MultiDeviceVector{Tv},
@@ -561,9 +623,9 @@ function reduce!(
                         ghost.send_buffers[d][k], ghost.recv_buffers[nbr][k_in_nbr],
                         ghost.host_buffers[d][k], ghost.p2p_ok[d][k],
                     )
-                    x.partitions[d][ghost.send_indices_gpu[d][k]] .= op.(
-                        x.partitions[d][ghost.send_indices_gpu[d][k]],
-                        ghost.send_buffers[d][k],
+                    _scatter_apply!(
+                        x.partitions[d], ghost.send_indices_gpu[d][k],
+                        ghost.send_buffers[d][k], op,
                     )
                 end
             end
