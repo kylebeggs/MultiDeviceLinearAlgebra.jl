@@ -1,6 +1,6 @@
 @testset "MultiDeviceVector" begin
     n = 100
-    ndev = min(NGPUS, 4)
+    ndev = NGPUS
 
     @testset "Construction and gather round-trip" begin
         v_cpu = randn(Float64, n)
@@ -13,6 +13,17 @@
 
         v_back = gather(v_md)
         @test v_back ≈ v_cpu
+    end
+
+    @testset "Default ndevices uses every visible GPU" begin
+        # The production default (`ndevices = length(CUDA.devices())`) is the
+        # configuration users actually get, so exercise it without the kwarg.
+        v_cpu = randn(Float64, n)
+        v_md = MultiDeviceVector(v_cpu)
+
+        @test v_md.spec.ndevices == NGPUS
+        @test collect(v_md.spec.devices) == collect(0:(NGPUS - 1))
+        @test gather(v_md) ≈ v_cpu
     end
 
     @testset "Construction with PartitionSpec" begin
@@ -47,9 +58,11 @@
     end
 
     @testset "Scalar getindex/setindex!" begin
-        v_cpu = collect(1.0:10.0)
+        # Sized off ndev so the partitioner never runs out of elements
+        m = max(10, ndev)
+        v_cpu = collect(1.0:Float64(m))
         v_md = MultiDeviceVector(v_cpu; ndevices = ndev)
-        for i in 1:10
+        for i in 1:m
             @test v_md[i] ≈ Float64(i)
         end
         v_md[5] = 99.0
@@ -182,7 +195,7 @@
         @test gather(v_with) ≈ gather(v_md)
     end
 
-    @testset "similar does not propagate ghost_exchange" begin
+    @testset "similar carries an independent ghost_exchange" begin
         ndev >= 2 || return
         spec = compute_partition_ranges(n, ndev)
         ggi = _neighbor_ghost_indices(spec)
@@ -191,7 +204,15 @@
         v_md = MultiDeviceVector(randn(n), spec, ghost)
         @test v_md.ghost_exchange === ghost
 
+        # `similar` hands back a `copy_exchange` of the source's exchange: same topology,
+        # but its own buffers, so writing through one result cannot disturb the other.
         w = similar(v_md)
-        @test w.ghost_exchange === nothing
+        @test w.ghost_exchange !== nothing
+        @test w.ghost_exchange !== ghost
+        @test w.ghost_exchange.ghost_global_indices == ghost.ghost_global_indices
+        @test w.ghost_exchange.neighbors == ghost.neighbors
+        for d in 1:ndev
+            @test w.ghost_exchange.local_x[d] !== ghost.local_x[d]
+        end
     end
 end

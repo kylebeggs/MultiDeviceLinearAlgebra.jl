@@ -1,6 +1,6 @@
 @testset "Ghost Exchange GPU" begin
     @testset "scatter! explicit" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -42,7 +42,7 @@
     end
 
     @testset "reduce! with +" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -96,7 +96,7 @@
     end
 
     @testset "reduce! with max" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -153,7 +153,7 @@
     end
 
     @testset "scatter! then reduce! round-trip" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -198,9 +198,11 @@
         end
     end
 
+    # Pinned at 2 devices on purpose: this is *about* one pair with unequal
+    # send/recv slab sizes, not about device count. The cross-socket variant of
+    # the same case lives in test_cross_socket.jl.
     @testset "Asymmetric ghost counts" begin
-        ndev = min(NGPUS, 2)
-        ndev < 2 && return
+        NGPUS < 2 && return
 
         n = 20
         spec = compute_partition_ranges(n, 2)
@@ -255,7 +257,7 @@ end
 
 @testset "Convenience scatter!/reduce! (vector-owned exchange)" begin
     @testset "scatter!(x) convenience" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -278,7 +280,7 @@ end
     end
 
     @testset "reduce!(x, op) convenience" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -317,7 +319,8 @@ end
     end
 
     @testset "scatter!/reduce! without exchange throws" begin
-        spec = compute_partition_ranges(20, min(NGPUS, 2))
+        # Not about device count — any legal partition of 20 elements will do.
+        spec = compute_partition_ranges(20, min(NGPUS, 20))
         x = MultiDeviceVector(randn(20), spec)
         @test_throws ArgumentError scatter!(x)
         @test_throws ArgumentError reduce!(x, +)
@@ -355,7 +358,7 @@ end
     end
 
     @testset "forced host path: scatter!" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -384,7 +387,7 @@ end
     end
 
     @testset "forced host path: reduce! with +" begin
-        for ndev in 1:min(NGPUS, 4)
+        for ndev in DEVICE_COUNTS
             ndev < 2 && continue
             @testset "$ndev devices" begin
                 n = 10 * ndev
@@ -428,9 +431,9 @@ end
         end
     end
 
+    # Pinned at 2 devices for the same reason as "Asymmetric ghost counts" above.
     @testset "forced host path: asymmetric ghost counts" begin
-        ndev = min(NGPUS, 2)
-        ndev < 2 && return
+        NGPUS < 2 && return
 
         n = 20
         spec = compute_partition_ranges(n, 2)
@@ -485,22 +488,22 @@ end
     end
 
     @testset "copy_exchange carries fallback state" begin
-        ndev = min(NGPUS, 2)
+        ndev = NGPUS
         ndev < 2 && return
 
-        n = 20
-        spec = compute_partition_ranges(n, 2)
+        n = 10 * ndev
+        spec = compute_partition_ranges(n, ndev)
         ggi = _neighbor_ghost_indices(spec)
 
         ghost = GhostExchange(ggi, spec, Float64)
-        for d in 1:2
+        for d in 1:ndev
             fill!(ghost.p2p_ok[d], false)
         end
 
         derived = MultiDeviceLinearAlgebra.copy_exchange(ghost, spec)
 
         @test derived.p2p_ok == ghost.p2p_ok
-        for d in 1:2
+        for d in 1:ndev
             @test derived.p2p_ok[d] !== ghost.p2p_ok[d]
             @test length.(derived.host_buffers[d]) == length.(ghost.host_buffers[d])
             for k in eachindex(ghost.host_buffers[d])
@@ -511,7 +514,7 @@ end
         x = MultiDeviceVector(collect(1.0:n), spec)
         scatter!(x, derived, spec)
 
-        for d in 1:2
+        for d in 1:ndev
             local_x_host = Array(derived.local_x[d])
             n_owned = length(spec.ranges[d])
             for (i, g) in enumerate(ggi[d])

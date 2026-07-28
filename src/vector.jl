@@ -54,7 +54,12 @@ function MultiDeviceVector(v::Vector{T}, spec::PartitionSpec) where {T}
     return MultiDeviceVector(v, spec, nothing)
 end
 
-function MultiDeviceVector(v::Vector{T}; ndevices::Int = length(CUDA.devices())) where {T}
+# `length(CUDA.devices())` returns an `Int32`, and a typed keyword default is passed
+# straight through without conversion — so the `Int` conversion here is what keeps the
+# no-kwarg call from throwing a MethodError. Do not drop it.
+function MultiDeviceVector(
+        v::Vector{T}; ndevices::Int = Int(length(CUDA.devices()))
+    ) where {T}
     spec = compute_partition_ranges(length(v), ndevices)
     return MultiDeviceVector(v, spec)
 end
