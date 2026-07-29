@@ -1,8 +1,21 @@
 # GPU↔GPU Communication Validation — 9× A30 host
 
-**Date:** 2026-07-27 · **Status:** HALTED after Stage 2. Verdict reached; driver wedged.
+**Date:** 2026-07-27 · **Status: RESOLVED — this document is a historical incident record.**
 
-## Verdict
+> **⚠️ Superseded. Do not read the verdict below as current state.**
+>
+> The fault described here was fixed the same day by the `intel_iommu=off` reboot prescribed under
+> [Fix](#fix). See **[`POST-FIX-VALIDATION.md`](POST-FIX-VALIDATION.md)** for the confirmation run:
+> 36/36 pairs passing at 14.39–17.84 GB/s, NCCL all-reduce healthy across all 9 GPUs.
+>
+> Re-confirmed 2026-07-29 while collecting device benchmarks for #26: `/proc/cmdline` carries
+> `intel_iommu=off` on kernel 7.0.0-28-generic, and MDLA's own `_p2p_copy_ok` probe returns ✓ for
+> every ordered pair it was run against. P2P on this host works.
+>
+> Everything below is kept as written on 2026-07-27, because the diagnostic trail is the useful
+> part — if this signature ever recurs, this is how it was identified.
+
+## Verdict (as of 2026-07-27 — no longer true, see banner)
 
 **Peer-to-peer GPU communication is broken on this host, on every pair tested — including the
 best-case topology.** This is not a cross-socket problem and not an application bug. It is a
@@ -80,6 +93,12 @@ only barrier is `Base.@sync`, which waits for Julia **tasks**, not CUDA **stream
 This is a genuine race independent of the P2P fault, and it will still be there after the IOMMU is
 fixed. Fix: `CUDA.synchronize()` at the end of each Phase-1 `@async` body.
 
+**Still open as of 2026-07-29.** `grep -rn synchronize src/` now returns one hit, but it is
+`_probe_p2p_copy` (`src/ghost.jl:178`), a construction-time probe — not the hot path. Phase 1 of
+`scatter!` still only enqueues its gather kernels, and `@sync` still waits on Julia tasks rather
+than CUDA streams, so the ordering described above is unchanged. Line numbers have moved since this
+was written (`scatter!` is now ~`:502`, `reduce!` ~`:600`).
+
 ## Test coverage gap
 
 MDLA's suites cap at `min(NGPUS, 4)` (`test/test_ghost_exchange.jl:3,45,99,156,258,281`) and MFO at
@@ -93,11 +112,14 @@ MDLA defaults to `ndevices = length(CUDA.devices())` = 9 in production (`src/vec
 `_allgather_x!` already does". **`_allgather_x!` does not exist in MDLA** — `grep -rn _allgather_x`
 finds it only in that README. The host-staging path must be written, not reused.
 
-## Stages not run
+## Stages not run *(at the time — since completed)*
 
 Stage 3 (`p2pBandwidthLatencyTest`), Stage 4 (NCCL correctness), Stage 5 (Julia pair matrix +
 missing-barrier test) were all skipped: the driver wedged, and the Stage 2 verdict is already
 unambiguous. Binaries are built and ready under `../` for a re-run after the host is fixed.
+
+**Update:** Stages 3 and 4 were run after the reboot and passed — see
+[`POST-FIX-VALIDATION.md`](POST-FIX-VALIDATION.md) and `06-p2pBandwidthLatencyTest.txt`.
 
 ## Artifacts
 
