@@ -1,0 +1,196 @@
+name: GPU tests and benchmarks
+
+# Runs on a self-hosted runner attached to a GPU host that OTHER PEOPLE SHARE. Two things follow
+# from that, and neither is optional.
+#
+# Security. This repository is public, so without gating, anyone could fork it, edit a file this
+# workflow executes, open a pull request, and run arbitrary code on the host. Fork PRs cannot alter
+# the workflow file itself — that is read from the base branch — but they fully control the sources
+# it runs and the packages it instantiates. Two independent controls prevent this:
+#
+#   1. Repo setting: "Require approval for all external contributors" (NOT the public-repo default
+#      of first-time contributors, which is too weak).
+#   2. The `if:` gate on every job below — a fork PR never even queues.
+#
+# Both are load-bearing. Removing either re-opens arbitrary code execution on the box.
+#
+# Courtesy. Other people's jobs live on this machine. Every job asks `gpu_preflight.sh` whether
+# devices are genuinely free before claiming any, pins itself to the subset it was granted, and
+# runs niced. When the host is busy a job stands down and says so out loud — see the note on
+# skip visibility below.
+
+on:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Run benchmarks even if the host looks busy (skips the load gate)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  pull-requests: write
+
+# One runner, one GPU host, so jobs must never overlap. Two concurrent runs would contend for the
+# same devices, and the allocation regression testset reads a counter that is global to its Julia
+# process — a second benchmark process running beside it would not corrupt that, but two runs
+# fighting over the same GPUs would make every timing meaningless.
+concurrency:
+  group: gpu-sasquatch
+  cancel-in-progress: false
+
+jobs:
+  # ── Correctness ────────────────────────────────────────────────────────────
+  # Cheap, short, and the reason this runner exists: the GPU half of the suite has never been able
+  # to run in CI. Only 2 devices and no load gate — correctness does not care how noisy the host is.
+  test-gpu:
+    name: GPU test suite
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, cuda]
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.12"
+      - uses: julia-actions/cache@v3
+
+      - name: Preflight — are 2 GPUs free?
+        id: pf
+        run: |
+          set +e
+          REASON=$(./benchmark/gpu_preflight.sh --need 2 --bare 2>&1 >/tmp/devs)
+          RC=$?
+          set -e
+          echo "$REASON"
+          if [ "$RC" -eq 0 ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "devices=$(cat /tmp/devs)" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Run test suite
+        if: steps.pf.outputs.ok == 'true'
+        env:
+          CUDA_VISIBLE_DEVICES: ${{ steps.pf.outputs.devices }}
+          JULIA_NUM_THREADS: "4"
+        run: nice -n 19 julia --project=. -e 'using Pkg; Pkg.test()'
+
+      - name: Report stand-down
+        if: steps.pf.outputs.ok != 'true'
+        run: |
+          echo "::warning title=GPU tests skipped::${{ steps.pf.outputs.reason }}"
+          echo "The shared GPU host had no free devices. This is a stand-down, not a pass."
+
+  # ── Performance ────────────────────────────────────────────────────────────
+  # Attempts on every PR, but only proceeds when there is genuinely room: 4 free devices AND a host
+  # not already loaded. With P2P degraded the halo exchange stages through host memory, so CPU
+  # contention lands directly on what we are trying to measure — a number taken on a loaded host is
+  # not worth posting.
+  benchmark-gpu:
+    name: GPU benchmarks
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    needs: test-gpu
+    runs-on: [self-hosted, cuda]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: julia-actions/setup-julia@v3
+        with:
+          version: "1.12"
+      - uses: julia-actions/cache@v3
+
+      - name: Preflight — 4 free GPUs and a quiet host?
+        id: pf
+        run: |
+          set +e
+          if [ "${{ inputs.force }}" = "true" ]; then
+            REASON=$(./benchmark/gpu_preflight.sh --need 4 --bare 2>&1 >/tmp/devs)
+          else
+            REASON=$(./benchmark/gpu_preflight.sh --need 4 --max-load-frac 0.6 --bare 2>&1 >/tmp/devs)
+          fi
+          RC=$?
+          set -e
+          echo "$REASON"
+          if [ "$RC" -eq 0 ]; then
+            echo "ok=true" >> "$GITHUB_OUTPUT"
+            echo "devices=$(cat /tmp/devs)" >> "$GITHUB_OUTPUT"
+          else
+            echo "ok=false" >> "$GITHUB_OUTPUT"
+            echo "reason=$REASON" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Instantiate benchmark environment
+        if: steps.pf.outputs.ok == 'true'
+        run: julia --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+
+      - name: Run benchmarks under the contention watchdog
+        if: steps.pf.outputs.ok == 'true'
+        env:
+          CUDA_VISIBLE_DEVICES: ${{ steps.pf.outputs.devices }}
+          JULIA_NUM_THREADS: "4"
+          POISSON_NX: "2000"
+        run: |
+          ./benchmark/gpu_watchdog.sh start --devices "$CUDA_VISIBLE_DEVICES" --log /tmp/wd.log
+          nice -n 19 julia --project=benchmark benchmark/gpu.jl 2>&1 | tee /tmp/gpu-bench.txt
+          RC=${PIPESTATUS[0]}
+          ./benchmark/gpu_watchdog.sh stop --log /tmp/wd.log
+          # Non-fatal: a contended run still produced numbers, they just must not be trusted.
+          # `check` writes its verdict to the log we fold into the PR comment below.
+          ./benchmark/gpu_watchdog.sh check --log /tmp/wd.log \
+              --devices "$CUDA_VISIBLE_DEVICES" 2>/tmp/wd-verdict.txt || true
+          exit "$RC"
+
+      - name: Build PR comment
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          {
+            echo '### GPU benchmark results'
+            echo ''
+            if [ "${{ steps.pf.outputs.ok }}" != "true" ]; then
+              # A silently absent table is exactly how a device-blind CPU table got mistaken for
+              # "the optimisation did nothing" on #26. Never let a skip look like a result.
+              echo '> **Stood down — these benchmarks did NOT run.**'
+              echo '>'
+              echo "> \`${{ steps.pf.outputs.reason }}\`"
+              echo '>'
+              echo '> The GPU host is shared and was busy. This is not a performance statement:'
+              echo '> no measurement was taken. Re-run via *Actions → GPU tests and benchmarks →'
+              echo '> Run workflow* when the host is quiet, or with **force** to skip the load gate.'
+            else
+              echo "Devices \`${{ steps.pf.outputs.devices }}\` on the shared GPU host, niced, 2000² grid."
+              echo ''
+              echo '```'
+              cat /tmp/wd-verdict.txt 2>/dev/null || true
+              echo '```'
+              echo ''
+              echo '<details><summary>Full output</summary>'
+              echo ''
+              echo '```'
+              cat /tmp/gpu-bench.txt
+              echo '```'
+              echo ''
+              echo '</details>'
+            fi
+          } > /tmp/body.md
+
+      - name: Find existing comment
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/find-comment@v4
+        id: fc
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: "github-actions[bot]"
+          body-includes: GPU benchmark results
+
+      - name: Post results
+        if: always() && github.event_name == 'pull_request'
+        uses: peter-evans/create-or-update-comment@v5
+        with:
+          comment-id: ${{ steps.fc.outputs.comment-id }}
+          issue-number: ${{ github.event.pull_request.number }}
+          body-path: /tmp/body.md
+          edit-mode: replace
