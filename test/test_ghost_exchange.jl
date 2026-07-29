@@ -324,10 +324,14 @@ end
     # broadcast. `_gather!` / `_scatter_apply!` replaced both with single launches, so the
     # steady-state device allocation of an exchange is now exactly zero.
     #
-    # `CUDA.@allocated` reads `CUDA.alloc_stats`, a process-global counter bumped on every
-    # `pool_alloc` — cache hits included, and from any device or task. That is what makes it
-    # usable across the `@sync`/`@async` device loop, and also why nothing else may be
-    # running on a GPU concurrently with this testset.
+    # `CUDA.@allocated` reads `CUDA.alloc_stats`, bumped on every `pool_alloc` — cache hits
+    # included, and from any device or task. That is what makes it usable across the
+    # `@sync`/`@async` device loop.
+    #
+    # Note the counter is a *Julia process* global (`const alloc_stats = AllocStats()` in
+    # CUDA.jl's `src/memory.jl`), not a device or driver one. Another tenant's job on the same
+    # GPU cannot perturb it, so this testset is safe to run on a shared host; the only
+    # requirement is that no other task in *this* process allocates concurrently.
     @testset "scatter!/reduce! allocate no device temporaries" begin
         for ndev in DEVICE_COUNTS
             ndev < 2 && continue
