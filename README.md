@@ -202,17 +202,51 @@ x, stats = Krylov.cg(A, b; atol=1e-12, rtol=1e-12)
 
 ## Benchmarking
 
-A Poisson benchmark script is included at `scripts/bench_poisson.jl`. It assembles a 2D Poisson system, distributes it across 1 to N GPUs, and reports upload, warmup, and solve times.
+Benchmarks come in two tiers, split by what the hardware allows.
+
+### `benchmark/gpu.jl` — multi-GPU, run by hand
+
+The real numbers. Sweeps device counts and reports, with a speedup column for each:
+
+- the fused `_gather!` / `_scatter_apply!` kernels against the broadcasts they replaced,
+  including device allocation per call;
+- `scatter!` / `reduce!` on a real Poisson halo;
+- SpMV `mul!`;
+- the CG solve, with iteration count, VRAM per device, and relative residual.
+
+Every section asserts parity against a CPU or broadcast reference before timing, so a run
+doubles as a smoke test on hardware CI cannot reach. The device inventory at the top prints the
+`_p2p_copy_ok` probe matrix — check it first if numbers look wrong, since a host with broken P2P
+silently degrades every transfer to host staging.
 
 ```bash
+julia --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+
 # Default 500×500 grid
-julia --project scripts/bench_poisson.jl
+julia --project=benchmark benchmark/gpu.jl
 
-# Custom grid size
-POISSON_NX=200 julia --project scripts/bench_poisson.jl
-
-# Custom number of timed runs (default 5)
-BENCH_NRUNS=10 julia --project scripts/bench_poisson.jl
+# Larger grid, more solve repetitions, explicit device sweep
+POISSON_NX=1500 BENCH_NRUNS=10 BENCH_NDEVICES=1,2,4,8 julia --project=benchmark benchmark/gpu.jl
 ```
 
-The script sweeps over device counts (1, 2, …, N) and verifies the solution against the manufactured exact solution `u = sin(πx)sin(πy)`.
+At the 500² default the problem is small enough that halo communication dominates and scaling
+is flat to negative; push `POISSON_NX` to 1500–2000 before drawing strong-scaling conclusions.
+
+### `benchmark/benchmarks.jl` — CPU, automatic on every PR
+
+An [AirspeedVelocity](https://github.com/MilesCranmer/AirspeedVelocity.jl) suite that
+`.github/workflows/Benchmark.yml` runs against both revisions of a pull request and posts as a
+ratio table. GitHub-hosted runners have no GPU, so it covers the host-side construction path
+only — matrix assembly, the CSC→CSR transpose, ghost discovery and topology, column remapping.
+That path is O(nnz) and worth guarding, but a clean table says nothing about device performance.
+
+```bash
+julia --project=benchmark -e 'include("benchmark/benchmarks.jl"); run(SUITE)'
+```
+
+Anything added there must also exist on a pull request's base branch, since the same file is run
+against both revisions.
+
+### `scripts/check_poisson.jl` — correctness, not timing
+
+Verifies the distributed solve against the manufactured exact solution `u = sin(πx)sin(πy)`.

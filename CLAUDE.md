@@ -20,4 +20,14 @@ Ghost/halo P2P exchange lives in `src/ghost.jl`; SpMV in `src/mul.jl`.
 - Matrix column indices are **remapped to local numbering** at construction (`1:n_owned` owned, then ghosts); `src/gather.jl` reverses this on the way back to the host. Raw device column indices are not global indices.
 - No submodules — adding an `include` in the wrong position breaks the load order.
 - GPU tests are gated on `CUDA.functional()` and sweep `1:min(NGPUS, 4)` device counts. The CPU-only tests (`test/test_partition.jl`, `test/test_ghost.jl`, `test/test_poisson.jl`) always run, so a green suite on a CPU box proves very little.
-- Benchmark grid size comes from an env var: `POISSON_NX=200 julia --project scripts/bench_poisson.jl` (default 500).
+- **Benchmarks are two-tier, and the CI tier is CPU-only.** `benchmark/benchmarks.jl` is the
+  AirspeedVelocity `SUITE` that `.github/workflows/Benchmark.yml` runs on every PR
+  (`ubuntu-latest`, no GPU) — it covers the host-side construction path only, so a clean ratio
+  table proves nothing about device performance. `benchmark/gpu.jl` holds the real multi-GPU
+  numbers and is run by hand on the GPU host:
+  `POISSON_NX=200 julia --project=benchmark benchmark/gpu.jl` (also `BENCH_NRUNS`,
+  `BENCH_NDEVICES`). Anything added to `benchmarks.jl` must exist on a PR's *base* branch too —
+  `benchpkg` runs the same file against both revisions.
+- Indexed device work goes through the fused `_gather!` / `_scatter_apply!` kernels in
+  `src/ghost.jl`, not broadcasts. `buf .= x[idx]` looks fused but is not: `getindex(::CuVector,
+  ::CuVector)` is evaluated eagerly and materializes a temporary per occurrence (issue #24).
