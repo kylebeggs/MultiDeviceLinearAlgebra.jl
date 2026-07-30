@@ -4,6 +4,7 @@ using LinearAlgebra
 using SparseArrays
 using Krylov
 using CUDA
+using Random
 
 const HAS_CUDA = CUDA.functional()
 # `length(CUDA.devices())` returns an `Int32`. The old `min(NGPUS, 4)` call sites
@@ -85,6 +86,47 @@ include("test_ghost.jl")
 include("test_poisson.jl")
 
 # GPU tests require CUDA
+"""
+    _tridiagonal_spd(n)
+
+`n×n` SPD tridiagonal with entries from `{-1, 4}`. Every partial sum of `A * (1:n)` is an
+integer exactly representable in `Float64`, so the SpMV result is exact regardless of
+accumulation order or device count — which makes a bitwise mismatch attributable to
+communication rather than rounding. Each device talks only to its immediate neighbours.
+"""
+function _tridiagonal_spd(n::Int)
+    e = fill(-1.0, max(n - 1, 0))
+    return spdiagm(-1 => e, 0 => fill(4.0, n), 1 => e)
+end
+
+"""
+    _dense_spd(n)
+
+`n×n` SPD `n·I + ones(n, n)`, likewise exactly summable against `1:n`. Where
+[`_tridiagonal_spd`](@ref) only couples neighbours, this couples *every* ordered device pair —
+at one row per device it is the only case in the suite that puts all `SYS`-class (cross-socket)
+links under load simultaneously. Its spectrum is `{n, 2n}`, two distinct eigenvalues, so exact
+CG terminates in two steps no matter how the rows are split.
+"""
+_dense_spd(n::Int) = sparse(fill(1.0, n, n) + n * I)
+
+"""
+    _sync_devices(spec)
+
+Block until every device backing `spec` has drained. `CUDA.synchronize()` covers only the
+current device, so checking a `@sync`/`@async` multi-device result without this can read memory
+the producing device has not finished writing.
+"""
+function _sync_devices(spec)
+    prev = CUDA.device()
+    for d in 1:spec.ndevices
+        CUDA.device!(device_id(spec, d))
+        CUDA.synchronize()
+    end
+    CUDA.device!(prev)
+    return nothing
+end
+
 """Helper: build neighbor-boundary ghost indices for testing."""
 function _neighbor_ghost_indices(spec)
     ggi = Vector{Vector{Int}}(undef, spec.ndevices)
@@ -105,6 +147,7 @@ if HAS_CUDA && NGPUS >= 1
     end
     include("test_ghost_exchange.jl")
     include("test_cross_socket.jl")
+    include("test_exact_exchange.jl")
     include("test_vector.jl")
     include("test_broadcast.jl")
     include("test_matrix.jl")

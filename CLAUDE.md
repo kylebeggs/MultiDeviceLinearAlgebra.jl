@@ -31,3 +31,12 @@ Ghost/halo P2P exchange lives in `src/ghost.jl`; SpMV in `src/mul.jl`.
 - Indexed device work goes through the fused `_gather!` / `_scatter_apply!` kernels in
   `src/ghost.jl`, not broadcasts. `buf .= x[idx]` looks fused but is not: `getindex(::CuVector,
   ::CuVector)` is evaluated eagerly and materializes a temporary per occurrence (issue #24).
+- **Results are not bitwise reproducible across device counts, and no `src/` change can make
+  them so.** cuSPARSE's CSR row-block schedule depends on the local row count and CUBLAS's
+  reduction tree on the partition length; neither is reachable from Julia. Measured: the scalar
+  reductions agree to 0–1 ULP while SpMV differs at `‖Δy‖/‖y‖ ≈ 6e-17`, so fixing the order of
+  `sum(partial)` in `src/vector_linalg.jl` addresses a mechanism that contributes nothing. Before
+  treating an `ndevices`-dependent number as a bug, run
+  `scripts/diagnose_partition_sensitivity.jl` — §1/§2 settle whether communication is sound
+  (exit nonzero if not) and §3–§5 separate rounding from conditioning. See the README's
+  "Reproducibility across device counts".

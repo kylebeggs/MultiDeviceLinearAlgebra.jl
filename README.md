@@ -200,6 +200,39 @@ x, stats = mdla_solve(A, b; atol=1e-12, rtol=1e-12)
 x, stats = Krylov.cg(A, b; atol=1e-12, rtol=1e-12)
 ```
 
+## Reproducibility across device counts
+
+**Results are not bitwise reproducible across `ndevices`, and cannot be made so from Julia.**
+The halo exchange itself is exact — with one DOF per GPU and integer-valued entries the SpMV
+matches the CPU product bit for bit on every device count, and repeated calls are bit-identical
+(`test/test_exact_exchange.jl`). What changes is the *order* the floating-point work is done in:
+
+- **cuSPARSE** schedules CSR row blocks according to the local row count, so each partitioning
+  accumulates a row's contributions in a different order.
+- **CUBLAS** picks a reduction tree shape from the partition length, so per-device `dot`/`norm`
+  partials are formed differently.
+
+Neither is reachable through CUDA.jl. Measured at 1000² Poisson against the single-device
+result: the scalar reductions agree to 0–1 ULP, while SpMV differs at the level of
+`‖Δy‖/‖y‖ ≈ 6e-17` — machine epsilon, but not zero. So the top-level `sum` over per-device
+partials in `src/vector_linalg.jl` is *not* where the difference enters, and making it
+fixed-order would not buy reproducibility.
+
+Two consequences worth knowing:
+
+1. **Pick a tolerance above the attainable floor.** For a residual-based stop the floor is
+   roughly `ε‖A‖‖x‖`. Asking for less means the solver can never converge on the true residual
+   and stops only when its recursively updated residual drifts under the threshold — hundreds of
+   iterations later, on a path set entirely by rounding, and therefore at a count that moves with
+   the device count. `benchmark/gpu.jl` prints the floor next to the residual for this reason.
+2. **Compare `ms/iter`, not wall-clock, across device counts.** If the iteration count differs,
+   wall-clock conflates solver throughput with the number of iterations and can hide a real
+   per-iteration speedup entirely.
+
+On a well-posed problem the iteration count has been invariant in practice (identical across
+1, 2, 4 and 9 devices at 1000² Poisson), but that is an observation, not a guarantee — do not
+assert it as an invariant on an ill-conditioned system.
+
 ## Benchmarking
 
 Benchmarks come in two tiers, split by what the hardware allows.
@@ -212,7 +245,8 @@ The real numbers. Sweeps device counts and reports, with a speedup column for ea
   including device allocation per call;
 - `scatter!` / `reduce!` on a real Poisson halo;
 - SpMV `mul!`;
-- the CG solve, with iteration count, VRAM per device, and relative residual.
+- the CG solve, with iteration count, `ms/iter`, VRAM per device, and the relative residual
+  printed next to the attainable residual floor.
 
 Every section asserts parity against a CPU or broadcast reference before timing, so a run
 doubles as a smoke test on hardware CI cannot reach. The device inventory at the top prints the
@@ -250,3 +284,26 @@ against both revisions.
 ### `scripts/check_poisson.jl` — correctness, not timing
 
 Verifies the distributed solve against the manufactured exact solution `u = sin(πx)sin(πy)`.
+
+### `scripts/diagnose_partition_sensitivity.jl` — why a result moved with the device count
+
+Run this when a number changes with `ndevices` and it is not obvious whether that is a bug or
+rounding. It separates the two, in that order:
+
+- **§1/§2 — is communication sound?** One DOF per GPU with integer-valued entries makes the SpMV
+  arithmetic exact, so the comparison is bitwise and any mismatch is communication with no
+  rounding to hide behind. Run against a tridiagonal pattern (neighbours only) and a dense one
+  (every ordered device pair, the only case here that crosses the socket). §2 then repeats the
+  SpMV back-to-back with no host synchronization, the access pattern CG produces. **The script
+  exits nonzero if either fails** — everything below is meaningless until they pass.
+- **§3–§5 — where does the difference enter?** ULP distances for `dot`, `norm` and SpMV against
+  the single-device result; whether the problem is well posed for the requested tolerance; and
+  iteration counts across device counts for an ill-posed, a well-posed, and an exactly-solvable
+  system.
+
+```bash
+julia --project=benchmark -e 'using Pkg; Pkg.develop(path="."); Pkg.instantiate()'
+DIAG_NX=1000 julia --project=benchmark scripts/diagnose_partition_sensitivity.jl
+```
+
+Knobs: `DIAG_NX`, `DIAG_NDEVICES`, `DIAG_REPEATS`, `DIAG_NRUNS` (drop to 1 to roughly halve §5).
