@@ -15,6 +15,17 @@
 #
 # Every timed section asserts parity against a reference first, so a run on unfamiliar hardware
 # doubles as a smoke test for the paths CI never executes.
+#
+# NOT COMPARABLE TO NUMBERS RECORDED BEFORE 2026-07-30. The solve benchmark used to take
+# b = 2π²·sin(πx)sin(πy), which is an exact eigenvector of the 5-point Laplacian this file
+# assembles — exact CG converges on it in one iteration, so every iteration past the first was
+# chasing rounding noise. It also asked for atol = rtol = 1e-12, roughly 90× below the attainable
+# residual floor at 1000² and further below it as the grid grows, so CG could never converge on
+# the true residual and stopped only when the recursively updated one drifted under the
+# threshold. Iteration counts from that setup measured the rounding pattern, not the solver, and
+# moved with the device count for the same reason (issue #27). The RHS is now a fixed-seed random
+# vector at a tolerance above the floor, and the floor is printed next to the residual so an
+# unattainable request is visible on sight.
 using BenchmarkTools
 using CUDA
 using LinearAlgebra
@@ -56,6 +67,10 @@ end
 const NGPUS = Int(length(CUDA.devices()))
 const NX = parse(Int, get(ENV, "POISSON_NX", "500"))
 const NRUNS = parse(Int, get(ENV, "BENCH_NRUNS", "5"))
+# Above the attainable residual floor at every grid size this file is meant to be run at. See
+# the header for what asking for less than the floor did to the iteration counts.
+const SOLVE_ATOL = 0.0
+const SOLVE_RTOL = 1.0e-8
 const DEVICE_COUNTS = if haskey(ENV, "BENCH_NDEVICES")
     sort!(unique(filter(<=(NGPUS), parse.(Int, split(ENV["BENCH_NDEVICES"], ",")))))
 else
@@ -245,14 +260,24 @@ end
 
 function bench_solve(A_cpu, b_cpu)
     header("CG solve `mdla_solve(A, b)` — device scaling ($NRUNS runs, median)")
+    # `ms/iter` is the honest per-device-count signal. Wall-clock conflates solver speed with
+    # iteration count, and the iteration count is not invariant across partitions — cuSPARSE's
+    # CSR row-block schedule depends on the local row count, so the rounding path differs. On an
+    # ill-posed problem that difference moved the count by 20% and buried a genuine per-iteration
+    # speedup (issue #27).
     @printf(
-        "%-9s %11s %9s %7s %11s   %s\n",
-        "devices", "time", "speedup", "iters", "VRAM/dev", "rel. residual"
+        "%-9s %11s %9s %7s %10s %11s   %s\n",
+        "devices", "time", "speedup", "iters", "ms/iter", "VRAM/dev", "rel. residual"
     )
     println("─"^78)
 
     n = length(b_cpu)
+    normb = norm(b_cpu)
+    # Max row sum as a stand-in for ‖A‖; only has to be right to a factor of a few to settle
+    # whether the requested tolerance is on the achievable side of the line.
+    normA = maximum(sum(abs, A_cpu; dims = 2))
     t_base = 0.0
+    floor_rel = 0.0
     for ndev in DEVICE_COUNTS
         A_md = MultiDeviceSparseMatrixCSR(A_cpu; ndevices = ndev)
         spec = A_md.row_spec
@@ -262,7 +287,7 @@ function bench_solve(A_cpu, b_cpu)
         # set of roughly four length-n vectors.
         vram_mb = ((nnz(A_cpu) ÷ ndev) * 12 + (n ÷ ndev) * (4 + 8 * 4)) / 2^20
 
-        mdla_solve(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)    # warm up and compile
+        mdla_solve(A_md, b_md; atol = SOLVE_ATOL, rtol = SOLVE_RTOL)    # warm up and compile
         sync_devices(spec)
 
         times = Float64[]
@@ -270,7 +295,7 @@ function bench_solve(A_cpu, b_cpu)
         for _ in 1:NRUNS
             sync_devices(spec)
             t = @elapsed begin
-                x_md, stats = mdla_solve(A_md, b_md; atol = 1.0e-12, rtol = 1.0e-12)
+                x_md, stats = mdla_solve(A_md, b_md; atol = SOLVE_ATOL, rtol = SOLVE_RTOL)
                 sync_devices(spec)
             end
             push!(times, t)
@@ -280,14 +305,25 @@ function bench_solve(A_cpu, b_cpu)
         stats.solved || error("CG did not converge at ndev=$ndev")
         y_md = similar(b_md)
         mul!(y_md, A_md, x_md)
-        rel_res = norm(gather(y_md) - b_cpu) / norm(b_cpu)
+        sync_devices(spec)
+        rel_res = norm(gather(y_md) - b_cpu) / normb
+        floor_rel == 0.0 && (floor_rel = eps(Float64) * normA * norm(gather(x_md)) / normb)
 
         ndev == first(DEVICE_COUNTS) && (t_base = t_med)
         @printf(
-            "%-9d %11s %8.2f× %7d %8.1f MB   %9.2e\n",
-            ndev, fmt(t_med), t_base / t_med, stats.niter, vram_mb, rel_res
+            "%-9d %11s %8.2f× %7d %10.4f %8.1f MB   %9.2e\n",
+            ndev, fmt(t_med), t_base / t_med, stats.niter,
+            1.0e3 * t_med / max(stats.niter, 1), vram_mb, rel_res
         )
     end
+    # A requested tolerance below this floor cannot be met on the true residual; CG would stop
+    # only once the recursively updated residual drifted under it, hundreds of iterations later
+    # on a path set entirely by rounding.
+    @printf(
+        "\nrequested rtol %.1e   ·   attainable floor ≈ ε‖A‖‖x‖/‖b‖ = %.2e   ·   %s\n",
+        SOLVE_RTOL, floor_rel,
+        SOLVE_RTOL > floor_rel ? "attainable" : "BELOW THE FLOOR — counts are rounding artifacts"
+    )
     println()
     return nothing
 end
@@ -301,8 +337,10 @@ print("Assembling $(NX)×$(NX) Poisson matrix... ")
 t_asm = @elapsed A_cpu = poisson_matrix_2d(NX, NX)
 @printf("%.3f s  (nnz = %d)\n\n", t_asm, nnz(A_cpu))
 
-h = 1.0 / (NX + 1)
-b_cpu = [2π^2 * sin(π * i * h) * sin(π * j * h) for j in 1:NX for i in 1:NX]
+# Fixed seed so the problem is identical run to run and across device counts. Deliberately not
+# the analytic sin·sin forcing: that vector is an eigenvector of this matrix (see the header).
+Random.seed!(0x00C0FFEE)
+b_cpu = randn(NX * NX)
 y_ref = A_cpu * b_cpu
 
 bench_ghost_exchange(A_cpu, b_cpu)
