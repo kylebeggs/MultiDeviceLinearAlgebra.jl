@@ -149,11 +149,11 @@ function section_environment()
         println()
     end
     if degraded > 0
-        @printf(
-            "\n  ⚠ %d ordered device pairs fall back to host staging. Every number below is\n" *
-                "    still correct, but timings are not representative of healthy hardware.\n",
-            degraded
-        )
+        # `@printf` needs a literal format string — a `*`-concatenated one fails at macro
+        # expansion, before the branch can even be reached.
+        @printf("\n  ⚠ %d ordered device pairs fall back to host staging. Every number\n", degraded)
+        println("    below is still correct, but timings are not representative of healthy")
+        println("    hardware.")
     end
     @printf(
         "\n  grid: %d×%d = %d unknowns    device counts swept: %s\n",
@@ -487,12 +487,9 @@ function section_problem_conditioning()
         println("  ⇒ b is not an eigenvector (defect $(eig_defect)); the one-iteration argument does not apply.")
     end
     if requested < floor_abs
-        @printf(
-            "  ⇒ the requested tolerance is %.0f× BELOW the attainable floor. CG cannot converge on\n" *
-                "    the true residual and stops only when the recursively updated residual drifts\n" *
-                "    under the threshold — an artifact, not a solve.\n",
-            floor_abs / requested
-        )
+        @printf("  ⇒ the requested tolerance is %.0f× BELOW the attainable floor. CG\n", floor_abs / requested)
+        println("    cannot converge on the true residual and stops only when the recursively")
+        println("    updated residual drifts under the threshold — an artifact, not a solve.")
     else
         @printf("  ⇒ the requested tolerance is %.1f× above the floor and is attainable.\n", requested / floor_abs)
     end
