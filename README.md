@@ -229,9 +229,10 @@ Two consequences worth knowing:
    wall-clock conflates solver throughput with the number of iterations and can hide a real
    per-iteration speedup entirely.
 
-On a well-posed problem the iteration count has been invariant in practice (identical across
-1, 2, 4 and 9 devices at 1000² Poisson), but that is an observation, not a guarantee — do not
-assert it as an invariant on an ill-conditioned system.
+On a well-posed problem the iteration count has been invariant in practice — identical across
+1, 2, 4 and 9 devices at both 1000² and 2000² Poisson, to the same true residual — but that is
+an observation about one host's CUBLAS/cuSPARSE, not a guarantee. Do not assert it as an
+invariant, and do not read an ill-posed problem's spread as wasted work.
 
 ## Benchmarking
 

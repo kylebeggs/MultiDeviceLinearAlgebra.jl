@@ -141,9 +141,9 @@ end
     end
 
     # A band, not equality. Measured on 9×A30 the count was identical across 1/2/4/9 devices at
-    # 1000² Poisson, but that is an observation about one host's CUBLAS/cuSPARSE and not
-    # something the package can guarantee — so the guard allows drift while still failing on the
-    # kind of blow-up a broken partition would cause.
+    # both 1000² and 2000² Poisson, but that is an observation about one host's CUBLAS/cuSPARSE
+    # and not something the package can guarantee — so the guard allows drift while still
+    # failing on the kind of blow-up a broken partition would cause.
     lo, hi = extrema(iter_counts)
     @test hi - lo <= max(2, ceil(Int, 0.05 * lo))
 
