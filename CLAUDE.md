@@ -29,7 +29,7 @@ Ghost/halo P2P exchange lives in `src/ghost.jl`; SpMV in `src/mul.jl`.
   both revisions.
 - **`benchmark/gpu.jl` holds the real multi-GPU numbers.** Run by
   `.github/workflows/BenchmarkGPU.yml` on the self-hosted runner, and by hand:
-  `POISSON_NX=2000 julia --project=benchmark benchmark/gpu.jl` (also `BENCH_NRUNS`,
+  `POISSON_NX=1000 julia --project=benchmark benchmark/gpu.jl` (also `BENCH_NRUNS`,
   `BENCH_NDEVICES`). Its §2 (`bench_indexed_kernels`) is single-device with no transfers and is the
   section to read for kernel-level changes; §3–§5 are communication-bound below ~1500² and scale
   flat-to-negative there.
@@ -37,8 +37,17 @@ Ghost/halo P2P exchange lives in `src/ghost.jl`; SpMV in `src/mul.jl`.
   device goes through `benchmark/gpu_preflight.sh` first, which samples utilisation, memory and
   resident compute processes over a window before claiming a subset, and
   `benchmark/gpu_watchdog.sh`, which flags a run that got contended. Pin with
-  `CUDA_VISIBLE_DEVICES` and stay niced: MDLA otherwise defaults to *every* visible device. See
-  `docs/gpu-ci-runner.md`.
+  `CUDA_VISIBLE_DEVICES`, cap with `JULIA_CUDA_HARD_MEMORY_LIMIT`, and stay niced: MDLA otherwise
+  defaults to *every* visible device and sizes its pool against whatever is free. **Busy means
+  wait, never barge in** — `--wait N` re-probes without holding anything rather than taking a
+  device someone is on, and `--wait-hook` lets a caller abandon a wait that stopped being worth
+  finishing. `--prefer-far` inverts the selection to the *worst*-connected subset, which is what
+  correctness runs want: handed a well-connected pair, `_far_device_pair()` reports
+  `cross_numa = false` and `test/test_cross_socket.jl` silently degrades to re-testing an adjacent
+  pair. See `docs/gpu-ci-runner.md`.
+- The shell tooling in `benchmark/` needs **bash 4+** (`mapfile`, associative arrays), so none of it
+  runs on a stock Mac — `/bin/bash` there is 3.2. `bash -n` is the most a dev box can check;
+  `benchmark/test_gpu_preflight.sh` (mocked `nvidia-smi`, no real devices) runs on the GPU host.
 - Indexed device work goes through the fused `_gather!` / `_scatter_apply!` kernels in
   `src/ghost.jl`, not broadcasts. `buf .= x[idx]` looks fused but is not: `getindex(::CuVector,
   ::CuVector)` is evaluated eagerly and materializes a temporary per occurrence (issue #24).
