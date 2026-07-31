@@ -8,6 +8,9 @@ function LinearAlgebra.mul!(
 
     scatter!(x, A.ghost_exchange, A.row_spec)
 
+    # Fresh tasks, so the SpMV reads `local_x[d]` from a different stream than the one
+    # `scatter!` assembled it on. Ordered by the same CUDA.jl mechanism documented at the
+    # phase boundary in `src/ghost.jl`.
     @sync for d in 1:x.spec.ndevices
         @async begin
             CUDA.device!(device_id(x.spec, d))
