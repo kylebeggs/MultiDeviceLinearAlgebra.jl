@@ -506,6 +506,23 @@ function scatter!(
     ) where {Tv}
     ndevices = row_spec.ndevices
 
+    # On the Phase 1 → Phase 2 boundary (issue #30). `@sync` waits on Julia *tasks*, and
+    # `_gather!` returns as soon as its kernel is enqueued, so this barrier does not by
+    # itself order the packing kernel on device `nbr` against Phase 2's peer read of
+    # `send_buffers[nbr]`. It does not have to: CUDA.jl wraps every `CuArray`'s memory in a
+    # `Managed` that records the last stream to touch it and calls `maybe_synchronize` when
+    # it is accessed from another stream or device — `CUDACore/src/memory.jl` on CUDA.jl 6.x,
+    # `src/memory.jl` on 5.x, checked across 5.9.5–6.1 (the `CUDA = "5, 6"` compat span).
+    # That is the default behaviour; the opt-out is `enable_synchronization!`, which this
+    # package never calls. So the ordering is real but lives one layer down, which is why it
+    # keeps getting re-derived as a race. `test/test_exact_exchange.jl` pins it: back-to-back
+    # exchanges with nothing draining the devices in between, compared bitwise.
+    #
+    # The guarantee rests on `@async`. Tasks are sticky to one thread and interleave
+    # cooperatively, so they never race on `Managed`'s unlocked `stream`/`dirty` fields.
+    # Rewriting these loops with `Threads.@spawn` would break that, and the phases would then
+    # need explicit CUDA events between them.
+
     # Phase 1: Pack send buffers (gather owned values at send indices)
     @sync for d in 1:ndevices
         @async begin
@@ -590,6 +607,9 @@ function reduce!(
         op::F,
     ) where {Tv, F <: Function}
     ndevices = spec.ndevices
+
+    # Same two-phase structure as `scatter!`, and safe for the same reason — see the note on
+    # the Phase 1 → Phase 2 boundary there.
 
     # Phase 1: Copy owned portion from local_x into x, and pack ghost contributions
     @sync for d in 1:ndevices

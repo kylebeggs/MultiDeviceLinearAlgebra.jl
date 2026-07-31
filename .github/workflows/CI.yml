@@ -43,8 +43,12 @@ jobs:
       - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
+          # Uploads from this repo need the token: Codecov rejects unauthenticated
+          # base-repo pushes ("Token required because branch is protected"). Failing the
+          # build on a rejected upload is deliberate — it went unnoticed for months
+          # behind `fail_ci_if_error: false` (issue #12).
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: false
+          fail_ci_if_error: true
   docs:
     name: Documentation
     runs-on: ubuntu-latest
