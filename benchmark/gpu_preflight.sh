@@ -124,10 +124,14 @@ probe() {
         UUID2IDX["$u"]="$i"
     done < <(nvidia-smi --query-gpu=index,uuid --format=csv,noheader | awk -F', *' 'NF { print $1, $2 }')
 
+    # NOTE the `$` in every subscript below, including inside (( )). For an ASSOCIATIVE array bash
+    # treats a subscript as a literal string, not an arithmetic expression — so `MAXUTIL[i]` reads
+    # the key "i", which is unset, i.e. 0. Written that way this whole guard silently reported every
+    # GPU free no matter how busy the host was, which is the one failure it exists to prevent.
     for ((s = 1; s <= SAMPLES; s++)); do
         while read -r i util mem; do
-            if ((util > MAXUTIL[i])); then MAXUTIL[$i]=$util; fi
-            if ((mem > MAXMEM[i])); then MAXMEM[$i]=$mem; fi
+            if ((util > MAXUTIL[$i])); then MAXUTIL[$i]=$util; fi
+            if ((mem > MAXMEM[$i])); then MAXMEM[$i]=$mem; fi
         done < <(nvidia-smi --query-gpu=index,utilization.gpu,memory.used \
             --format=csv,noheader,nounits | awk -F', *' 'NF { print $1, $2, $3 }')
 
@@ -144,7 +148,7 @@ probe() {
 
     FREE=()
     for i in "${IDX[@]}"; do
-        if ((MAXUTIL[i] <= MAX_UTIL)) && ((MAXMEM[i] <= MAX_MEM)) && ((HASAPP[i] == 0)); then
+        if ((MAXUTIL[$i] <= MAX_UTIL)) && ((MAXMEM[$i] <= MAX_MEM)) && ((HASAPP[$i] == 0)); then
             FREE+=("$i")
         fi
     done
