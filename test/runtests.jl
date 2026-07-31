@@ -151,6 +151,7 @@ if HAS_CUDA && NGPUS >= 1
     include("test_vector.jl")
     include("test_broadcast.jl")
     include("test_matrix.jl")
+    include("test_rectangular.jl")
     include("test_krylov.jl")
 else
     @warn "CUDA not available or no GPUs detected, skipping GPU tests"

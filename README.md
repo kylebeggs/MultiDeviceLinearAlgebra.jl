@@ -133,9 +133,13 @@ Supports `getindex`, `setindex!`, `similar`, `zero`, `fill!`, `copyto!`, and ful
 
 ### Matrices
 
-#### `MultiDeviceSparseMatrixCSR{Tv,Ti,GE} <: AbstractMatrix{Tv}`
+#### `MultiDeviceSparseMatrixCSR{Tv,Ti,GE,VP,P,PC} <: AbstractMatrix{Tv}`
 
 A row-partitioned sparse CSR matrix distributed across GPUs. Each device holds its block of rows as a `CuSparseMatrixCSR` with column indices remapped to local numbering. Ghost (off-partition) values are exchanged between devices via P2P transfers before each SpMV — only the needed values are communicated, not the entire vector.
+
+Rows and columns carry **independent** `PartitionSpec`s (`row_spec` and `col_spec`), so the matrix may be rectangular — a prolongation operator maps a coarse space to a fine one, and the two spaces are partitioned separately. For a square matrix built from a single spec, `A.col_spec === A.row_spec`.
+
+Device-resident index arrays are always `Int32`, whatever index type the host `SparseMatrixCSC` used, because cuSPARSE's sparse-sparse routines accept only 32-bit indices. `gather` still returns host-native `Int` indices.
 
 **Constructors:**
 
@@ -143,9 +147,14 @@ A row-partitioned sparse CSR matrix distributed across GPUs. Each device holds i
 # From a CPU SparseMatrixCSC — converts to CSR, computes ghost topology, and distributes
 MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC; ndevices=length(CUDA.devices()))
 
-# From a CPU SparseMatrixCSC with an explicit partition
+# From a CPU SparseMatrixCSC with an explicit partition (square matrices only)
 MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC, row_spec::PartitionSpec)
+
+# Rectangular: rows and columns partitioned independently
+MultiDeviceSparseMatrixCSR(A::SparseMatrixCSC, row_spec::PartitionSpec, col_spec::PartitionSpec)
 ```
+
+Both specs must span the same devices in the same order. An `x` passed to `mul!` must be partitioned like `A.col_spec` and `y` like `A.row_spec` — matching lengths alone are not accepted, since a differently-split vector of the right length would silently read the wrong entries.
 
 ### Operations
 
@@ -175,14 +184,20 @@ Solves `Ax = b` using Krylov.jl's conjugate gradient method. All keyword argumen
 
 #### `poisson_matrix_2d(nx, ny; T=Float64) → SparseMatrixCSC`
 
-Generates the standard 5-point finite-difference Laplacian on an `nx × ny` grid with Dirichlet boundary conditions. Useful for testing and benchmarking.
+Generates the standard 5-point finite-difference Laplacian on an `nx × ny` grid with Dirichlet boundary conditions. Grid point `(i, j)` is unknown `(j - 1) * nx + i`. Useful for testing and benchmarking.
+
+#### `prolongation_matrix_2d(nx, ny; bx=2, by=2, T=Float64) → SparseMatrixCSC`
+
+Piecewise-constant (injection) prolongation for the same `nx × ny` grid: fine point `(i, j)` belongs to the aggregate covering the `bx × by` block it falls in, with unit weight. The result is `nx*ny × nxc*nyc` where `nxc = cld(nx, bx)` and `nyc = cld(ny, by)`, so aggregates along the far edges may be partial.
+
+Exactly one nonzero per row, which makes `P' * A * P` the aggregate-summed Galerkin operator — a two-level coarse-grid fixture with no algebraic-multigrid dependency. The coarse space is numbered column-major to match the fine one, which keeps a contiguous block of fine unknowns mapping to a contiguous block of coarse ones and the distributed halo a surface rather than an all-to-all.
 
 ## Supported Operations
 
 | Category | Operations |
 |---|---|
 | **LinearAlgebra** | `dot`, `norm`, `axpy!`, `axpby!`, `rmul!`, `lmul!`, `mul!` |
-| **SpMV** | `mul!(y, A, x)` and `mul!(y, A, x, α, β)` — sparse matrix-vector multiply with P2P ghost exchange |
+| **SpMV** | `mul!(y, A, x)` and `mul!(y, A, x, α, β)` — sparse matrix-vector multiply with P2P ghost exchange, square or rectangular |
 | **Base** | `fill!`, `copyto!`, `similar`, `zero`, `getindex`, `setindex!` |
 | **Broadcasting** | Full element-wise broadcasting (e.g., `y .= α .* x .+ β .* z`) |
 
