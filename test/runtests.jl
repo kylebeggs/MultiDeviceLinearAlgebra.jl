@@ -81,6 +81,7 @@ const FAR_PAIR = HAS_CUDA ? _far_device_pair() : nothing
 # CPU-only tests
 include("test_partition.jl")
 include("test_ghost.jl")
+include("test_matrix_host.jl")
 
 # Poisson matrix construction tests (CPU portion always runs, GPU portion gated internally)
 include("test_poisson.jl")
