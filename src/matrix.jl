@@ -7,8 +7,8 @@ Fixed at `Int32` rather than following the host matrix's index type, because cuS
 sparse-sparse routines — SpGEMM, `csr2csc`, `geam` — accept only 32-bit indices. SpMV is the
 exception: its generic descriptor honours whatever `eltype(rowPtr)` it is handed, which is why
 64-bit indices worked here for as long as SpMV was the only operation. A single device block
-would need more than `typemax(Int32)` nonzeros to overflow this, which no GPU has the memory
-to hold; construction checks it anyway.
+overflows this only past `typemax(Int32)` nonzeros — about 26 GB of `Float64` CSR, within
+reach of an 80 GB device — so construction checks and rejects it.
 """
 const DeviceIndex = Int32
 
