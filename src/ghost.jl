@@ -511,7 +511,9 @@ function _localize_colval_kernel!(
             lo = one(Ti)
             hi = n_ghost
             while lo < hi
-                mid = (lo + hi) >> 1
+                # Overflow-safe midpoint: `lo + hi` exceeds typemax(Int32) once the ghost
+                # list passes 2^30 entries, which the checked column bound still permits.
+                mid = lo + ((hi - lo) >> 1)
                 @inbounds if ghosts[mid] < c
                     lo = mid + one(Ti)
                 else
