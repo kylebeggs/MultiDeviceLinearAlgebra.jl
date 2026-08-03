@@ -56,6 +56,30 @@ function _revalidate_spec(spec::PartitionSpec, what::AbstractString)
     return validated
 end
 
+"""
+    _check_spec_device_agreement(row_spec, col_spec)
+
+Require the row and column partitions to span the same number of devices and the same CUDA
+device IDs in the same order. Every per-device loop indexes both specs with one `d` and
+assumes they name the same device; violated, the mismatch surfaces as cross-device memory
+traffic that runs — slowly — rather than an error.
+"""
+function _check_spec_device_agreement(row_spec::PartitionSpec, col_spec::PartitionSpec)
+    row_spec.ndevices == col_spec.ndevices || throw(
+        ArgumentError(
+            "Row partition spans $(row_spec.ndevices) devices but column partition spans " *
+                "$(col_spec.ndevices)",
+        ),
+    )
+    collect(Int, row_spec.devices) == collect(Int, col_spec.devices) || throw(
+        ArgumentError(
+            "Row and column partitions must use the same CUDA devices in the same order, got " *
+                "$(collect(Int, row_spec.devices)) and $(collect(Int, col_spec.devices))",
+        ),
+    )
+    return nothing
+end
+
 function MultiDeviceSparseMatrixCSR(
         # `Int(...)` is load-bearing: `length(CUDA.devices())` is an `Int32` and a typed
         # keyword default is not converted, so without it the no-kwarg call MethodErrors.
@@ -102,18 +126,7 @@ function MultiDeviceSparseMatrixCSR(
             "Column PartitionSpec covers $(col_spec.len) columns but matrix has $ncols"
         )
     )
-    row_spec.ndevices == col_spec.ndevices || throw(
-        ArgumentError(
-            "Row partition spans $(row_spec.ndevices) devices but column partition spans " *
-                "$(col_spec.ndevices)",
-        ),
-    )
-    collect(Int, row_spec.devices) == collect(Int, col_spec.devices) || throw(
-        ArgumentError(
-            "Row and column partitions must use the same CUDA devices in the same order, got " *
-                "$(collect(Int, row_spec.devices)) and $(collect(Int, col_spec.devices))",
-        ),
-    )
+    _check_spec_device_agreement(row_spec, col_spec)
     ndevices = row_spec.ndevices
 
     At = SparseMatrixCSC(sparse(A'))
@@ -217,6 +230,7 @@ function _assemble_from_blocks(
         col_spec::PartitionSpec,
         dims::Tuple{Int, Int},
     ) where {Tv}
+    _check_spec_device_agreement(row_spec, col_spec)
     ndevices = row_spec.ndevices
     length(blocks) == ndevices || throw(
         ArgumentError("Got $(length(blocks)) blocks for $ndevices devices")

@@ -179,6 +179,25 @@ end
             end
         end
 
+        @testset "_assemble_from_blocks rejects disagreeing specs" begin
+            if NGPUS >= 2
+                # Same guardrail as the host constructor: a device-order mismatch between
+                # the two specs would place partitions on a different device than the SpMV
+                # runs on — unified addressing makes that run slowly instead of erroring.
+                m, n = 40, 20
+                A_cpu = sprand(Float64, m, n, 0.2)
+                row_spec = compute_partition_ranges(m, 2)
+                blocks = _global_column_blocks(A_cpu, row_spec)
+                @test_throws ArgumentError _assemble_from_blocks(
+                    blocks, row_spec,
+                    compute_partition_ranges(n, 2; devices = [1, 0]), (m, n)
+                )
+                @test_throws ArgumentError _assemble_from_blocks(
+                    blocks, row_spec, compute_partition_ranges(n, 1), (m, n)
+                )
+            end
+        end
+
         @testset "SpMV rejects a mismatched vector partition" begin
             if NGPUS >= 2
                 # Same total length, different split: a length-only check would accept this
