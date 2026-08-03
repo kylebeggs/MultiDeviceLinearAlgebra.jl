@@ -265,4 +265,121 @@ end
             @test_throws ArgumentError GhostExchange([[3], Int[]], spec, Float64)
         end
     end
+
+    # A rectangular operator's columns live in a different space from its rows — a
+    # prolongation maps a coarse space to a fine one — so column ownership has to be resolved
+    # against a column partition rather than the row partition doing double duty. These run on
+    # CPU, which matters: they are the only tier GitHub CI executes.
+    @testset "Rectangular _compute_ghost_map" begin
+        @testset "Hand-computed 8×12 over 2 devices" begin
+            # Rows split [1:4 | 5:8], columns split [1:6 | 7:12].
+            A = spzeros(8, 12)
+            A[1, 1] = 1.0
+            A[2, 2] = 1.0
+            A[3, 7] = 1.0     # device 1 reaches into device 2's columns
+            A[4, 1] = 1.0
+            A[5, 8] = 1.0
+            A[6, 6] = 1.0     # device 2 reaches into device 1's columns
+            A[7, 12] = 1.0
+            A[8, 8] = 1.0
+
+            rowptr, colval = _to_csr(A)
+            row_spec = PartitionSpec([1:4, 5:8])
+            col_spec = PartitionSpec([1:6, 7:12])
+
+            ggi, nbrs, sli, rgo, nrev = _compute_ghost_map(rowptr, colval, row_spec, col_spec)
+
+            # Ghosts are the columns outside each device's *column* range. Resolved against
+            # the row partition instead, device 1 would call column 7 owned and column 5 a
+            # ghost — both wrong.
+            @test ggi[1] == [7]
+            @test ggi[2] == [6]
+
+            @test nbrs[1] == [2]
+            @test nbrs[2] == [1]
+
+            # Send indices are local to the owning device's *column* block: global column 7
+            # is device 2's local 1, global column 6 is device 1's local 6.
+            @test sli[2] == [[1]]
+            @test sli[1] == [[6]]
+
+            @test rgo[1] == [1:1]
+            @test rgo[2] == [1:1]
+            @test nrev[1] == [1]
+            @test nrev[2] == [1]
+        end
+
+        @testset "Ghosts are exactly the off-partition columns, ndev=$ndev" for ndev in [2, 3]
+            A = sprand(9, 15, 0.4)
+            rowptr, colval = _to_csr(A)
+            row_spec = compute_partition_ranges(9, ndev)
+            col_spec = compute_partition_ranges(15, ndev)
+
+            ggi, nbrs, sli, rgo, _ = _compute_ghost_map(rowptr, colval, row_spec, col_spec)
+
+            for d in 1:ndev
+                r = row_spec.ranges[d]
+                owned = col_spec.ranges[d]
+                touched = sort!(
+                    unique(Int.(colval[rowptr[first(r)]:(rowptr[last(r) + 1] - 1)]))
+                )
+                @test ggi[d] == filter(!in(owned), touched)
+                @test issorted(ggi[d])
+                @test all(!in(owned), ggi[d])
+                @test sum(length, rgo[d]; init = 0) == length(ggi[d])
+            end
+        end
+
+        # The layout invariant the whole exchange rests on: `local_x` is `[owned | ghost]`
+        # with the ghost region filled neighbor-block by neighbor-block, so concatenating
+        # those blocks in neighbor order must reproduce the globally sorted ghost list. It
+        # survives rectangularization only because the column ranges are also contiguous and
+        # ascending.
+        @testset "Neighbor-block concatenation invariant, ndev=$ndev" for ndev in [2, 3, 4]
+            A = sprand(12, 20, 0.3)
+            rowptr, colval = _to_csr(A)
+            row_spec = compute_partition_ranges(12, ndev)
+            col_spec = compute_partition_ranges(20, ndev)
+
+            ggi, nbrs, _, rgo, _ = _compute_ghost_map(rowptr, colval, row_spec, col_spec)
+
+            for d in 1:ndev
+                concat = reduce(
+                    vcat, [ggi[d][rgo[d][k]] for k in eachindex(nbrs[d])]; init = Int[]
+                )
+                @test concat == ggi[d]
+            end
+        end
+
+        @testset "Three-argument method forwards" begin
+            A = poisson_matrix_2d(4, 4)
+            rowptr, colval = _to_csr(A)
+            spec = compute_partition_ranges(16, 2)
+            @test _compute_ghost_map(rowptr, colval, spec) ==
+                _compute_ghost_map(rowptr, colval, spec, spec)
+        end
+
+        @testset "Prolongation over a coarsened Poisson grid" begin
+            # The fixture the distributed triple product is built on. Injection gives one
+            # nonzero per row, so a device's ghost columns are just the coarse aggregates its
+            # fine rows land in that it does not own.
+            P = prolongation_matrix_2d(6, 6; bx = 2, by = 2)
+            rowptr, colval = _to_csr(P)
+            row_spec = compute_partition_ranges(36, 2)
+            col_spec = compute_partition_ranges(9, 2)
+
+            ggi, _, _, rgo, _ = _compute_ghost_map(rowptr, colval, row_spec, col_spec)
+
+            for d in 1:2
+                owned = col_spec.ranges[d]
+                @test all(!in(owned), ggi[d])
+                @test issorted(ggi[d])
+                @test sum(length, rgo[d]; init = 0) == length(ggi[d])
+            end
+            # Column-major coarse numbering keeps the halo a surface: with 36 fine rows split
+            # in half and 9 coarse columns, neither device reaches across into more than a
+            # couple of aggregates.
+            @test all(d -> length(ggi[d]) <= 3, 1:2)
+        end
+    end
 end

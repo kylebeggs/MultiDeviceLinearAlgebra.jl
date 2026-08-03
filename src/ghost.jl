@@ -72,27 +72,34 @@ function _compute_ghost_topology(
 end
 
 """
-    _compute_ghost_map(csr_rowptr, csr_colval, row_spec)
+    _compute_ghost_map(csr_rowptr, csr_colval, row_spec, col_spec)
 
 Discover ghost indices from CSR sparsity pattern, then compute communication topology.
 Returns `(ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse)`.
+
+`row_spec` slices the rows each device owns; `col_spec` decides which *columns* it owns, and
+so which are ghosts. The two coincide for a square matrix whose columns are partitioned like
+its rows — the three-argument method below — but not for a rectangular operator, whose column
+space has its own partition.
 """
 function _compute_ghost_map(
         csr_rowptr::AbstractVector{Ti},
         csr_colval::AbstractVector{Ti},
         row_spec::PartitionSpec,
+        col_spec::PartitionSpec,
     ) where {Ti <: Integer}
     ndevices = row_spec.ndevices
     ghost_global_indices = Vector{Vector{Int}}(undef, ndevices)
 
     for d in 1:ndevices
-        owned_range = row_spec.ranges[d]
+        row_range = row_spec.ranges[d]
+        owned_cols = col_spec.ranges[d]
         ghost_set = Set{Int}()
-        rp_start = csr_rowptr[first(owned_range)]
-        rp_end = csr_rowptr[last(owned_range) + 1] - 1
+        rp_start = csr_rowptr[first(row_range)]
+        rp_end = csr_rowptr[last(row_range) + 1] - 1
         for idx in rp_start:rp_end
             col = Int(csr_colval[idx])
-            if !(col in owned_range)
+            if !(col in owned_cols)
                 push!(ghost_set, col)
             end
         end
@@ -100,10 +107,18 @@ function _compute_ghost_map(
     end
 
     neighbors, send_local_indices, recv_ghost_offsets, neighbor_reverse =
-        _compute_ghost_topology(ghost_global_indices, row_spec)
+        _compute_ghost_topology(ghost_global_indices, col_spec)
 
     return ghost_global_indices, neighbors, send_local_indices, recv_ghost_offsets,
         neighbor_reverse
+end
+
+function _compute_ghost_map(
+        csr_rowptr::AbstractVector{Ti},
+        csr_colval::AbstractVector{Ti},
+        spec::PartitionSpec,
+    ) where {Ti <: Integer}
+    return _compute_ghost_map(csr_rowptr, csr_colval, spec, spec)
 end
 
 """
@@ -194,6 +209,10 @@ Construction probes each communicating device pair with a small data round-trip 
 transparently degrades to host-staged transfers (with a one-time warning) on pairs where
 direct P2P copies silently corrupt data.
 
+Every index here lives in the space being scattered — for a matrix, its **column** space, so
+the exchange is built against `col_spec` rather than `row_spec`. The two coincide for a square
+matrix partitioned alike in both dimensions.
+
 # Fields
 - `ghost_global_indices` — global indices needed as ghosts on each device
 - `neighbors` — neighboring device indices for each device
@@ -227,15 +246,15 @@ function GhostExchange(
         send_local_indices::Vector{Vector{Vector{Int}}},
         recv_ghost_offsets::Vector{Vector{UnitRange{Int}}},
         neighbor_reverse::Vector{Vector{Int}},
-        row_spec::PartitionSpec,
+        spec::PartitionSpec,
         ::Type{Tv},
     ) where {Tv}
-    ndevices = row_spec.ndevices
+    ndevices = spec.ndevices
 
     p2p_ok = Vector{Vector{Bool}}(undef, ndevices)
     for d in 1:ndevices
         p2p_ok[d] = [
-            _p2p_copy_ok(device_id(row_spec, nbr), device_id(row_spec, d))
+            _p2p_copy_ok(device_id(spec, nbr), device_id(spec, d))
                 for nbr in neighbors[d]
         ]
     end
@@ -248,8 +267,8 @@ function GhostExchange(
 
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(device_id(row_spec, d))
-            n_owned = length(row_spec.ranges[d])
+            CUDA.device!(device_id(spec, d))
+            n_owned = length(spec.ranges[d])
             n_ghost = length(ghost_global_indices[d])
             local_x[d] = CuVector{Tv}(undef, n_owned + n_ghost)
 
@@ -450,6 +469,88 @@ function _scatter_apply!(
     return x
 end
 
+function _mark_present_kernel!(present, colval)
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(colval)
+        @inbounds present[colval[i]] = true
+    end
+    return nothing
+end
+
+"""
+    _mark_present!(present, colval)
+
+Set `present[j] = true` for every column index `j` appearing in `colval`.
+
+Threads that hit the same column all write the same value into the same byte, so the race is
+benign — the alternative (sorting an `nnz`-length array to find the distinct entries) costs
+strictly more than the `length(present)` bytes this needs.
+"""
+function _mark_present!(present::CuVector{Bool}, colval::CuVector{<:Integer})
+    n = length(colval)
+    n == 0 && return present
+    kernel = @cuda launch = false _mark_present_kernel!(present, colval)
+    threads = min(n, launch_configuration(kernel.fun).threads)
+    kernel(present, colval; threads, blocks = cld(n, threads))
+    return present
+end
+
+function _localize_colval_kernel!(
+        dest, src, owned_first::Ti, owned_last::Ti, n_owned::Ti, n_ghost::Ti, ghosts
+    ) where {Ti}
+    i = (blockIdx().x - 1) * blockDim().x + threadIdx().x
+    if i <= length(src)
+        @inbounds c = src[i]
+        if owned_first <= c <= owned_last
+            @inbounds dest[i] = c - owned_first + one(Ti)
+        else
+            # Binary search rather than a dense global→local table: the table would be another
+            # array the width of the whole column space on every device, and `nnz·log(n_ghost)`
+            # is nothing next to the multiply that produced these columns. `n_ghost` is passed
+            # in rather than read off `ghosts` so the kernel holds no checked conversion.
+            lo = one(Ti)
+            hi = n_ghost
+            while lo < hi
+                # Overflow-safe midpoint: `lo + hi` exceeds typemax(Int32) once the ghost
+                # list passes 2^30 entries, which the checked column bound still permits.
+                mid = lo + ((hi - lo) >> 1)
+                @inbounds if ghosts[mid] < c
+                    lo = mid + one(Ti)
+                else
+                    hi = mid
+                end
+            end
+            @inbounds dest[i] = n_owned + lo
+        end
+    end
+    return nothing
+end
+
+"""
+    _localize_colval!(dest, src, owned, ghosts)
+
+Map global column indices in `src` into the `[1:n_owned owned | ghosts]` local numbering used
+by every device-resident block, writing the result to `dest`.
+
+The device-side counterpart of the reverse mapping [`gather`](@ref) performs on the host, and
+the inverse of what [`_remap_colval`](@ref) does for a host-assembled matrix. `ghosts` must be
+sorted ascending and must contain every entry of `src` that falls outside `owned`.
+"""
+function _localize_colval!(
+        dest::CuVector{Ti}, src::CuVector{Ti}, owned::UnitRange{Int}, ghosts::CuVector{Ti}
+    ) where {Ti <: Integer}
+    n = length(src)
+    n == 0 && return dest
+    args = (
+        dest, src, Ti(first(owned)), Ti(last(owned)), Ti(length(owned)),
+        Ti(length(ghosts)), ghosts,
+    )
+    kernel = @cuda launch = false _localize_colval_kernel!(args...)
+    threads = min(n, launch_configuration(kernel.fun).threads)
+    kernel(args...; threads, blocks = cld(n, threads))
+    return dest
+end
+
 """
     scatter!(x::MultiDeviceVector)
 
@@ -498,13 +599,16 @@ Owner→ghost exchange: pack owned data into send buffers, transfer between devi
 and assemble `local_x = [owned | ghost]` on each device. Device pairs whose
 construction-time P2P probe failed are transferred via pre-allocated host staging
 buffers instead of direct D2D copies.
+
+`spec` partitions the space `x` lives in. Called from `mul!`, that is the matrix's
+`col_spec`, not its `row_spec`.
 """
 function scatter!(
         x::MultiDeviceVector{Tv},
         ghost::GhostExchange{Tv},
-        row_spec::PartitionSpec,
+        spec::PartitionSpec,
     ) where {Tv}
-    ndevices = row_spec.ndevices
+    ndevices = spec.ndevices
 
     # On the Phase 1 → Phase 2 boundary (issue #30). `@sync` waits on Julia *tasks*, and
     # `_gather!` returns as soon as its kernel is enqueued, so this barrier does not by
@@ -526,7 +630,7 @@ function scatter!(
     # Phase 1: Pack send buffers (gather owned values at send indices)
     @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(device_id(row_spec, d))
+            CUDA.device!(device_id(spec, d))
             for k in eachindex(ghost.neighbors[d])
                 _gather!(
                     ghost.send_buffers[d][k], x.partitions[d], ghost.send_indices_gpu[d][k]
@@ -538,8 +642,8 @@ function scatter!(
     # Phase 2: P2P transfer into recv buffers and assemble local_x
     return @sync for d in 1:ndevices
         @async begin
-            CUDA.device!(device_id(row_spec, d))
-            n_owned = length(row_spec.ranges[d])
+            CUDA.device!(device_id(spec, d))
+            n_owned = length(spec.ranges[d])
 
             # Copy owned partition into local_x[1:n_owned]
             copyto!(view(ghost.local_x[d], 1:n_owned), x.partitions[d])

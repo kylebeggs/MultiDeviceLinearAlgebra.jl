@@ -55,3 +55,31 @@ for ndev in DEVICE_COUNTS
     SUITE["ghost"]["_remap_colval, $ndev dev"] =
         @benchmarkable MDLA._remap_colval($colval_block, $r, $(ggi[1]))
 end
+
+# Ghost discovery for a *rectangular* operator, where column ownership is resolved against a
+# separate column partition. `hasmethod` rather than `isdefined`: the function has existed all
+# along, only the four-argument method is new, and this same file runs against the PR's base
+# revision where that method does not exist.
+if hasmethod(
+        MDLA._compute_ghost_map,
+        Tuple{Vector{Int}, Vector{Int}, MDLA.PartitionSpec, MDLA.PartitionSpec},
+    )
+    # Injection prolongation over the same grid: NX² fine rows, one nonzero each, coarsened 2×2.
+    P = prolongation_matrix_2d(NX, NX; bx = 2, by = 2)
+    PT = _to_csr(P)
+    P_ROWPTR = PT.colptr
+    P_COLVAL = PT.rowval
+    NC = size(P, 2)
+
+    SUITE["assembly"]["prolongation_matrix_2d $(NX)²"] =
+        @benchmarkable prolongation_matrix_2d($NX, $NX; bx = 2, by = 2)
+
+    for ndev in DEVICE_COUNTS
+        row_spec = compute_partition_ranges(N, ndev)
+        col_spec = compute_partition_ranges(NC, ndev)
+        SUITE["ghost"]["_compute_ghost_map rectangular, $ndev dev"] =
+            @benchmarkable MDLA._compute_ghost_map(
+            $P_ROWPTR, $P_COLVAL, $row_spec, $col_spec
+        )
+    end
+end

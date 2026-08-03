@@ -23,6 +23,26 @@ Return the 0-indexed CUDA device ID for partition `d`.
 """
 device_id(spec::PartitionSpec, d::Int) = spec.devices[d]
 
+"""
+    _specs_match(a::PartitionSpec, b::PartitionSpec)
+
+Whether `a` and `b` describe the same partition on the same devices.
+
+`PartitionSpec` defines no `==`, so Julia's fallback compares the *identity* of the
+heap-allocated `ranges` and `devices` fields: two specs built independently from the same
+`n` and `ndevices` are never `==`. Every partition-compatibility check must go through this
+function instead.
+"""
+function _specs_match(a::PartitionSpec, b::PartitionSpec)
+    a.len == b.len || return false
+    a.ndevices == b.ndevices || return false
+    for d in 1:a.ndevices
+        a.ranges[d] == b.ranges[d] || return false
+        device_id(a, d) == device_id(b, d) || return false
+    end
+    return true
+end
+
 function _validate_devices(devices::AbstractVector{Int}, ndevices::Int)
     length(devices) == ndevices || throw(
         ArgumentError("Length of devices ($(length(devices))) must equal ndevices ($ndevices)")

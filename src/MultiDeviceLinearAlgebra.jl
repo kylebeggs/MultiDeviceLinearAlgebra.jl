@@ -21,6 +21,6 @@ export PartitionSpec, compute_partition_ranges, device_for_index, device_id
 export MultiDeviceVector, MultiDeviceSparseMatrixCSR
 export GhostExchange, scatter!, reduce!, attach_ghost
 export gather, mdla_solve
-export poisson_matrix_2d
+export poisson_matrix_2d, prolongation_matrix_2d
 
 end

@@ -1,3 +1,5 @@
+using MultiDeviceLinearAlgebra: _specs_match
+
 @testset "PartitionSpec & compute_partition_ranges" begin
     @testset "Even division" begin
         spec = compute_partition_ranges(100, 4)
@@ -160,5 +162,39 @@ end
     @testset "Validation: duplicate device IDs" begin
         @test_throws ArgumentError compute_partition_ranges(100, 3; devices = [0, 1, 1])
         @test_throws ArgumentError PartitionSpec([1:50, 51:100]; devices = [3, 3])
+    end
+end
+
+@testset "_specs_match" begin
+    @testset "The `==` trap" begin
+        # `PartitionSpec` defines no `==`, so the fallback compares the identity of the
+        # heap-allocated `ranges`/`devices` fields. Two specs describing the very same
+        # partition are therefore never `==` — which is exactly why `_specs_match` exists,
+        # and why writing `a == b` in a compatibility check silently rejects every
+        # legitimate pairing.
+        a = compute_partition_ranges(100, 4)
+        b = compute_partition_ranges(100, 4)
+        @test _specs_match(a, b)
+        @test a != b
+        @test _specs_match(a, a)
+    end
+
+    @testset "Mismatches" begin
+        a = compute_partition_ranges(100, 4)
+        @test !_specs_match(a, compute_partition_ranges(100, 2))
+        @test !_specs_match(a, compute_partition_ranges(101, 4))
+        # Same len and same ndevices, different ranges — the case a length check misses.
+        @test !_specs_match(a, PartitionSpec([1:10, 11:40, 41:70, 71:100]))
+        # Same ranges, different physical devices.
+        @test !_specs_match(a, compute_partition_ranges(100, 4; devices = [3, 2, 1, 0]))
+    end
+
+    @testset "Device list representation" begin
+        # Default devices are a `UnitRange`, explicit ones a `Vector` — different field
+        # types, same partition.
+        implicit = compute_partition_ranges(60, 3)
+        explicit = compute_partition_ranges(60, 3; devices = [0, 1, 2])
+        @test typeof(implicit.devices) != typeof(explicit.devices)
+        @test _specs_match(implicit, explicit)
     end
 end
