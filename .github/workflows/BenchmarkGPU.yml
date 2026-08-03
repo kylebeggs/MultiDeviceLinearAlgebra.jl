@@ -76,8 +76,10 @@ jobs:
     name: GPU test suite
     if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
     runs-on: [self-hosted, cuda]
-    # Covers the preflight wait (GPU_WAIT_SECONDS) plus the suite itself.
-    timeout-minutes: 165
+    # Covers the preflight wait (GPU_WAIT_SECONDS) plus the suite itself, which now runs under
+    # coverage instrumentation; revisit the margin once an instrumented run has reported its
+    # wall clock.
+    timeout-minutes: 195
     steps:
       - uses: actions/checkout@v7
       - uses: julia-actions/setup-julia@v3
@@ -145,7 +147,27 @@ jobs:
         env:
           CUDA_VISIBLE_DEVICES: ${{ steps.pf.outputs.devices }}
           JULIA_NUM_THREADS: "4"
-        run: nice -n 19 julia --project=. -e 'using Pkg; Pkg.test()'
+        # coverage=true instruments host-side Julia only — device kernels compile through
+        # GPUCompiler, which emits no coverage counters — so GPU load is unchanged. This job is
+        # the only place the device paths ever execute under coverage; without its upload they
+        # read 0% forever.
+        run: nice -n 19 julia --project=. -e 'using Pkg; Pkg.test(coverage=true)'
+
+      # Both post-suite steps gate on the preflight, so a stand-down skips them cleanly. The
+      # .cov files land inside the checkout and actions/checkout's default clean removes them
+      # on this persistent runner before the next run.
+      - uses: julia-actions/julia-processcoverage@v1
+        if: steps.pf.outputs.ok == 'true'
+      - uses: codecov/codecov-action@v7
+        if: steps.pf.outputs.ok == 'true'
+        with:
+          files: lcov.info
+          flags: gpu
+          # Same rationale as CI.yml (issue #12): a silently rejected upload would silently
+          # erase the only GPU coverage sessions this repo produces — worse here, because
+          # carryforward would then mask the dead flag on every subsequent commit.
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
 
       - name: Report stand-down
         if: steps.pf.outputs.ok != 'true'

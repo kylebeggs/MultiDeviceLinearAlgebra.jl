@@ -1,0 +1,30 @@
+# Coverage arrives from two independent sources:
+#   cpu — GitHub-hosted runners (CI.yml): partition/ghost host logic + host-side validation.
+#   gpu — the shared self-hosted GPU host (BenchmarkGPU.yml test-gpu): the full suite.
+# The gpu job can stand down when the host stays busy for the whole wait window, so its flag
+# carries forward from the last successful upload instead of reading as a coverage collapse.
+# Carryforward fills PROJECT coverage only — it cannot cover new patch lines, so a stand-down
+# on a PR that adds device-only code leaves codecov/patch red until the workflow is re-run
+# (Actions → "GPU tests and benchmarks" → Run workflow on the PR branch).
+#
+# cpu deliberately does NOT carry forward: it uploads on every run, and carrying it forward
+# would only mask a broken CI.yml upload — the exact failure mode issue #12 was about.
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        # Absorbs line-shift jitter when fresh cpu coverage merges with a carried-forward
+        # gpu report taken on an older commit.
+        threshold: 1%
+    patch:
+      default:
+        target: auto
+        threshold: 1%
+
+flag_management:
+  default_rules:
+    carryforward: false
+  individual_flags:
+    - name: gpu
+      carryforward: true

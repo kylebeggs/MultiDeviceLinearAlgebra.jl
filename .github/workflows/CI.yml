@@ -43,6 +43,7 @@ jobs:
       - uses: codecov/codecov-action@v7
         with:
           files: lcov.info
+          flags: cpu
           # Uploads from this repo need the token: Codecov rejects unauthenticated
           # base-repo pushes ("Token required because branch is protected"). Failing the
           # build on a rejected upload is deliberate — it went unnoticed for months
